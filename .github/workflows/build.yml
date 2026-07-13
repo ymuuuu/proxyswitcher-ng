@@ -1,0 +1,60 @@
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install packaging tools
+        run: brew install ldid dpkg xz
+
+      - name: Install Theos
+        run: |
+          set -euo pipefail
+          export THEOS=$HOME/theos
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+
+      - name: Install iOS SDK (patched, includes PrivateFrameworks)
+        run: |
+          set -euo pipefail
+          # Xcode's public SDK has no Preferences.framework; pull one patched SDK.
+          # theos already ships an (empty) sdks dir, so clone to a temp and move in.
+          TMP=$(mktemp -d)
+          git clone -n --depth=1 --filter=tree:0 https://github.com/theos/sdks "$TMP/sdks"
+          cd "$TMP/sdks"
+          git sparse-checkout set --no-cone iPhoneOS16.5.sdk
+          git checkout
+          mkdir -p "$THEOS/sdks"
+          mv iPhoneOS16.5.sdk "$THEOS/sdks/"
+          ls -d "$THEOS/sdks/"*/ | head
+
+      - name: Build package
+        run: |
+          set -euo pipefail
+          make clean || true
+          make package FINALPACKAGE=1
+
+      - name: Show built Mach-O arch (arm64e ABI sanity)
+        run: |
+          set -euo pipefail
+          BUNDLE_BIN=$(find . -path '*ProxySwitcherNG.bundle/ProxySwitcherNG' -type f | head -1)
+          echo "bundle bin: $BUNDLE_BIN"
+          otool -hv "$BUNDLE_BIN" || true
+          lipo -detailed_info "$BUNDLE_BIN" || true
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxyswitcherng-deb
+          path: packages/*.deb
+          if-no-files-found: error
