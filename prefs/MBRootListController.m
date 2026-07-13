@@ -412,11 +412,11 @@ static void PSApplyButtonStateChanged(CFNotificationCenterRef center, void *obse
 		UIAction *delete = [UIAction actionWithTitle:@"Delete"
 										   image:nil
 									identifier:nil
-								  attributes:UIMenuElementAttributesDestructive
 									 handler:^(__kindof UIAction *action) {
 			[MBRootListController deleteProfileAtIndex:index];
 			[self reloadSpecifiers];
 		}];
+		delete.attributes = UIMenuElementAttributesDestructive;
 		return [UIMenu menuWithTitle:@"" children:@[edit, delete]];
 	}];
 }
