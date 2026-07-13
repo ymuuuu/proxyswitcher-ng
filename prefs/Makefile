@@ -1,4 +1,8 @@
-TARGET := iphone:clang:latest:15.0
+# Pin the SDK to 16.5 so theos uses the patched $THEOS/sdks copy (which ships
+# PrivateFrameworks/Preferences.tbd). `latest` would resolve to Xcode's public
+# SDK, which has no PrivateFrameworks -> "framework 'Preferences' not found".
+# The arm64e ABI 0x80 comes from Xcode's clang/ld64 (via xcrun), not the SDK.
+TARGET := iphone:clang:16.5:15.0
 ARCHS = arm64e
 
 include $(THEOS)/makefiles/common.mk
