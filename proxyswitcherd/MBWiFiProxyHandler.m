@@ -67,9 +67,10 @@
     // is ignored by the network stack) and never send -isEqualToNumber: to a
     // string later (which crashes).
     NSNumber *port = [self asNumber:(__bridge_transfer id)CFPreferencesCopyValue(CFSTR("port"), appID, CFSTR("mobile"), kCFPreferencesAnyHost)];
+    NSString *activeProxy = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("activeProxy"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 
     NSString *source = @"cfprefsd";
-    if (!enabled && !type && !server && !port) {
+    if (!enabled && !type && !server && !port && !activeProxy) {
         source = @"fallback-file";
         NSDictionary *preferences = [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/io.ymuu.proxyswitcherng.plist"];
         if (!preferences) {
@@ -79,9 +80,21 @@
         type = [preferences objectForKey:@"type"];
         server = [preferences stringForKeySafely:@"server"];
         port = [preferences numberForKeySafely:@"port"];
+        activeProxy = [preferences stringForKeySafely:@"activeProxy"];
     }
 
     NSLog(@"[proxyswitcherngd] prefs source=%@ enabled=%@ type=%@ server=%@ port=%@", source, enabled ?: @"(nil)", type ?: @"(nil)", server ?: @"(nil)", port ?: @"(nil)");
+
+    if (activeProxy.length > 0) {
+        NSString *pHost = nil; NSNumber *pPort = nil;
+        if ([MBWiFiProxyHandler parseHostPort:activeProxy host:&pHost port:&pPort]) {
+            NSLog(@"[proxyswitcherngd] activeProxy=%@ -> server=%@ port=%@", activeProxy, pHost, pPort);
+            server = pHost;
+            port = pPort;
+        } else {
+            NSLog(@"[proxyswitcherngd] activeProxy=%@ malformed; using manual server/port", activeProxy);
+        }
+    }
 
     BOOL enabledBool = enabled ? [enabled boolValue] : YES;
     NSInteger typeInt = type ? [type integerValue] : 0;
@@ -284,6 +297,31 @@
     if ([value isKindOfClass:[NSNumber class]]) { return value; }
     if ([value isKindOfClass:[NSString class]]) { return @([(NSString *)value integerValue]); }
     return nil;
+}
+
++ (BOOL)parseHostPort:(NSString *)value host:(NSString **)outHost port:(NSNumber **)outPort {
+    if (![value isKindOfClass:[NSString class]]) { return NO; }
+    NSCharacterSet *ws = [NSCharacterSet whitespaceAndNewlineCharacterSet];
+    NSString *trimmed = [value stringByTrimmingCharactersInSet:ws];
+    if (trimmed.length == 0) { return NO; }
+
+    NSRange colon = [trimmed rangeOfString:@":" options:NSBackwardsSearch];
+    if (colon.location == NSNotFound) { return NO; }
+
+    NSString *host = [[trimmed substringToIndex:colon.location] stringByTrimmingCharactersInSet:ws];
+    NSString *portStr = [[trimmed substringFromIndex:colon.location + 1] stringByTrimmingCharactersInSet:ws];
+    if (host.length == 0 || portStr.length == 0) { return NO; }
+
+    NSCharacterSet *digits = [NSCharacterSet characterSetWithCharactersInString:@"0123456789"];
+    NSCharacterSet *nonDigits = [digits invertedSet];
+    if ([portStr rangeOfCharacterFromSet:nonDigits].location != NSNotFound) { return NO; }
+
+    NSInteger port = [portStr integerValue];
+    if (port < 1 || port > 65535) { return NO; }
+
+    if (outHost) { *outHost = host; }
+    if (outPort) { *outPort = @(port); }
+    return YES;
 }
 
 // Type-strict, crash-safe field checks: a value of the wrong class (e.g. a
