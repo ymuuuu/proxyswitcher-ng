@@ -1,0 +1,9 @@
+Package: io.ymuu.proxyswitcherng
+Name: ProxySwitcher-ng
+Version: 2.0.0
+Architecture: iphoneos-arm64
+Description: Easily toggle the Wi-Fi HTTP/HTTPS proxy (rootless/roothide).
+Maintainer: ymuu
+Author: ymuu
+Section: Tweaks
+Depends: preferenceloader, firmware (>= 15.0)

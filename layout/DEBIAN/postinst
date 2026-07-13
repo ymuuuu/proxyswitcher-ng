@@ -1,0 +1,14 @@
+#!/bin/sh
+# launchd refuses to load a daemon whose plist/binary is group- or world-writable
+# or not owned by root:wheel. Building on some filesystems (e.g. exFAT/NTFS mounts)
+# records the wrong owner/mode, so normalise here before bootstrapping.
+PLIST=/var/jb/Library/LaunchDaemons/io.ymuu.proxyswitcherngd.plist
+BIN=/var/jb/usr/bin/proxyswitcherngd
+chown root:wheel "$PLIST" "$BIN" 2>/dev/null
+chmod 644 "$PLIST" 2>/dev/null
+chmod 755 "$BIN" 2>/dev/null
+
+launchctl bootout system "$PLIST" 2>/dev/null
+launchctl bootstrap system "$PLIST" 2>/dev/null || \
+launchctl load "$PLIST" 2>/dev/null
+exit 0

@@ -1,0 +1,15 @@
+# Theos build artifacts
+.theos/
+packages/
+*.deb
+*.ipa
+
+# macOS / editor cruft
+.DS_Store
+*.swp
+
+# Scratch
+tmp/
+
+docs/
+ProxySwitcher/

@@ -1,0 +1,4 @@
+#!/bin/sh
+launchctl bootout system /var/jb/Library/LaunchDaemons/io.ymuu.proxyswitcherngd.plist 2>/dev/null || \
+launchctl unload /var/jb/Library/LaunchDaemons/io.ymuu.proxyswitcherngd.plist 2>/dev/null
+exit 0
