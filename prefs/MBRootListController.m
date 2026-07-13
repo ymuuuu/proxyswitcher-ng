@@ -96,7 +96,19 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 		}
 
 		NSArray *profiles = [MBRootListController readProfiles];
-		[_specifiers addObjectsFromArray:[self profileSpecifiersForProfiles:profiles]];
+		NSArray *profileSpecs = [self profileSpecifiersForProfiles:profiles];
+
+		// Insert the Profiles section above the Diagnostics group so the final
+		// order is Enabled, Proxy Server, Profiles, Diagnostics (logging/Logs),
+		// About. Diagnostics stays in Root.plist to keep its pref auto-wiring.
+		NSUInteger insertAt = _specifiers.count;
+		for (NSUInteger i = 0; i < _specifiers.count; i++) {
+			PSSpecifier *s = _specifiers[i];
+			if ([s.name isEqualToString:@"Diagnostics"]) { insertAt = i; break; }
+		}
+		NSIndexSet *indexes = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(insertAt, profileSpecs.count)];
+		[_specifiers insertObjects:profileSpecs atIndexes:indexes];
+
 		[_specifiers addObjectsFromArray:[self aboutSpecifiers]];
 	}
 

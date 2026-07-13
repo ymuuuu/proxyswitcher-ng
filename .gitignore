@@ -13,3 +13,6 @@ tmp/
 
 docs/
 ProxySwitcher/
+
+# Local-only publishing helper (repo signing key stays off GitHub)
+scripts/
