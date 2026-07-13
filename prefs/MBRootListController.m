@@ -2,16 +2,37 @@
 #import "MBProfileEditController.h"
 #import "MBLogsController.h"
 #import <CoreFoundation/CoreFoundation.h>
+#import <CFNetwork/CFNetwork.h>
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
+#import <objc/runtime.h>
 
 static NSString * const kPrefsDomain = @"io.ymuu.proxyswitcherng";
 static NSString * const kSettingsChangedNotification = @"io.ymuu.proxyswitcherng/settingschanged";
+static NSString * const kNoneToken = @"__none__";
 
 static NSString * const kProfileKey = @"isProfile";
 static NSString * const kManualKey = @"isManual";
 static NSString * const kProfileValueKey = @"profileValue";
 static NSString * const kProfileIndexKey = @"profileIndex";
+
+static char kLinkURLKey;
+
+static void PSApplyButtonStateChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+	MBRootListController *controller = (__bridge MBRootListController *)observer;
+	dispatch_async(dispatch_get_main_queue(), ^{
+		controller.navigationItem.rightBarButtonItem.enabled = [MBRootListController isEnabled];
+	});
+}
+
+@interface MBRootListController ()
+
++ (BOOL)parseHostPort:(NSString *)value host:(NSString **)outHost port:(NSNumber **)outPort;
+
+- (UIButton *)iconButtonNamed:(NSString *)name URLString:(NSString *)URLString;
+- (void)openLink:(UIButton *)sender;
+
+@end
 
 @implementation MBRootListController
 
@@ -45,6 +66,20 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
 	CFPreferencesSetValue(CFSTR("activeProxy"), (__bridge CFPropertyListRef)(activeProxy ?: @""), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+}
+
++ (BOOL)isEnabled {
+	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFBooleanRef cfValue = CFPreferencesCopyValue(CFSTR("enabled"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	if (!cfValue) { return YES; }
+	if (CFGetTypeID(cfValue) != CFBooleanGetTypeID()) {
+		CFRelease(cfValue);
+		return YES;
+	}
+	BOOL enabled = CFBooleanGetValue(cfValue);
+	CFRelease(cfValue);
+	return enabled;
 }
 
 + (void)postSettingsChanged {
@@ -88,6 +123,31 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 	}
 }
 
++ (BOOL)parseHostPort:(NSString *)value host:(NSString **)outHost port:(NSNumber **)outPort {
+	if (![value isKindOfClass:[NSString class]]) { return NO; }
+	NSCharacterSet *ws = [NSCharacterSet whitespaceAndNewlineCharacterSet];
+	NSString *trimmed = [value stringByTrimmingCharactersInSet:ws];
+	if (trimmed.length == 0) { return NO; }
+
+	NSRange colon = [trimmed rangeOfString:@":" options:NSBackwardsSearch];
+	if (colon.location == NSNotFound) { return NO; }
+
+	NSString *host = [[trimmed substringToIndex:colon.location] stringByTrimmingCharactersInSet:ws];
+	NSString *portStr = [[trimmed substringFromIndex:colon.location + 1] stringByTrimmingCharactersInSet:ws];
+	if (host.length == 0 || portStr.length == 0) { return NO; }
+
+	NSCharacterSet *digits = [NSCharacterSet characterSetWithCharactersInString:@"0123456789"];
+	NSCharacterSet *nonDigits = [digits invertedSet];
+	if ([portStr rangeOfCharacterFromSet:nonDigits].location != NSNotFound) { return NO; }
+
+	NSInteger port = [portStr integerValue];
+	if (port < 1 || port > 65535) { return NO; }
+
+	if (outHost) { *outHost = host; }
+	if (outPort) { *outPort = @(port); }
+	return YES;
+}
+
 - (NSArray *)specifiers {
 	if (!_specifiers) {
 		_specifiers = [self loadSpecifiersFromPlistName:@"Root" target:self];
@@ -116,14 +176,7 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 }
 
 - (NSArray *)aboutSpecifiers {
-	NSBundle *bundle = [NSBundle bundleForClass:[self class]];
-	NSDictionary *info = bundle.infoDictionary;
-	NSString *version = info[@"CFBundleShortVersionString"] ?: @"0.1-dev";
-	NSString *build = info[@"CFBundleVersion"] ?: @"0";
-	NSString *footer = [NSString stringWithFormat:@"ProxySwitcher-ng %@ (build %@)", version, build];
-
 	PSSpecifier *group = [PSSpecifier groupSpecifierWithName:@"About"];
-	[group setProperty:footer forKey:PSFooterTextGroupKey];
 	return @[group];
 }
 
@@ -134,13 +187,27 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 	[group setProperty:@"Selected profile overrides manual Server/Port." forKey:PSFooterTextGroupKey];
 	[specifiers addObject:group];
 
+	PSSpecifier *none = [PSSpecifier preferenceSpecifierNamed:@"None (no proxy)"
+													  target:self
+														set:NULL
+														get:NULL
+													   detail:NULL
+														cell:PSButtonCell
+														edit:NULL];
+	none->action = @selector(selectProfile:);
+	[none setProperty:@(YES) forKey:kProfileKey];
+	[none setProperty:@(NO) forKey:kManualKey];
+	[none setProperty:kNoneToken forKey:kProfileValueKey];
+	[none setProperty:@(-1) forKey:kProfileIndexKey];
+	[specifiers addObject:none];
+
 	PSSpecifier *manual = [PSSpecifier preferenceSpecifierNamed:@"Manual (Server/Port)"
-														target:self
-															set:NULL
-															get:NULL
-															detail:NULL
-															cell:PSButtonCell
-															edit:NULL];
+													   target:self
+														set:NULL
+														get:NULL
+													   detail:NULL
+														cell:PSButtonCell
+														edit:NULL];
 	manual->action = @selector(selectProfile:);
 	[manual setProperty:@(YES) forKey:kProfileKey];
 	[manual setProperty:@(YES) forKey:kManualKey];
@@ -164,7 +231,7 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 															  target:self
 																set:NULL
 																get:NULL
-																detail:NULL
+															   detail:NULL
 																cell:PSButtonCell
 																edit:NULL];
 		specifier->action = @selector(selectProfile:);
@@ -175,13 +242,13 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 		[specifiers addObject:specifier];
 	}
 
-	PSSpecifier *add = [PSSpecifier preferenceSpecifierNamed:@"Add Profile…"
+	PSSpecifier *add = [PSSpecifier preferenceSpecifierNamed:@"Add Profile..."
 													  target:self
-															 set:NULL
-															 get:NULL
-															detail:NULL
-															 cell:PSButtonCell
-															 edit:NULL];
+														 set:NULL
+														 get:NULL
+														detail:NULL
+														 cell:PSButtonCell
+														 edit:NULL];
 	add->action = @selector(addProfile:);
 	[specifiers addObject:add];
 
@@ -220,36 +287,88 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 }
 
 - (void)applyAndVerify:(id)sender {
+	if (![MBRootListController isEnabled]) {
+		[MBRootListController postSettingsChanged];
+		return;
+	}
+
 	[MBRootListController postSettingsChanged];
 
-	NSURL *url = [NSURL URLWithString:@"http://captive.apple.com/hotspot-detect.html"];
-	NSURLRequest *request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:5.0];
+	NSString *activeProxy = [MBRootListController activeProxy] ?: @"";
+	NSString *testHost = nil;
+	NSNumber *testPort = nil;
+
+	if ([activeProxy isEqualToString:kNoneToken]) {
+		UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Apply"
+																   message:@"Proxy is off (None), nothing to test."
+															preferredStyle:UIAlertControllerStyleAlert];
+		[alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+		[self presentViewController:alert animated:YES completion:nil];
+		return;
+	}
+
+	if ([MBRootListController parseHostPort:activeProxy host:&testHost port:&testPort]) {
+		// Real profile selected: use its host:port.
+	} else {
+		// Manual mode: read server and port from prefs.
+		CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+		CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+		NSString *server = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("server"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+		if (![server isKindOfClass:[NSString class]]) { server = nil; }
+		id portValue = (__bridge_transfer id)CFPreferencesCopyValue(CFSTR("port"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+		NSInteger port = 0;
+		if ([portValue isKindOfClass:[NSNumber class]]) {
+			port = [(NSNumber *)portValue integerValue];
+		} else if ([portValue isKindOfClass:[NSString class]]) {
+			port = [(NSString *)portValue integerValue];
+		}
+		if (server.length > 0 && port > 0 && port <= 65535) {
+			testHost = server;
+			testPort = @(port);
+		}
+	}
+
+	if (!testHost || !testPort) {
+		UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Apply"
+																   message:@"No proxy set to test."
+															preferredStyle:UIAlertControllerStyleAlert];
+		[alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+		[self presentViewController:alert animated:YES completion:nil];
+		return;
+	}
+
+	NSString *displayHostPort = [NSString stringWithFormat:@"%@:%@", testHost, testPort];
+
 	NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
-	config.timeoutIntervalForRequest = 5.0;
+	config.timeoutIntervalForRequest = 8.0;
+	// Only the HTTP proxy keys are available on iOS (the HTTPS-specific keys are
+	// macOS only). On iOS NSURLSession routes HTTPS through the HTTP proxy via
+	// CONNECT, so these are enough to test the proxy against an https URL.
+	config.connectionProxyDictionary = @{
+		(__bridge NSString *)kCFNetworkProxiesHTTPEnable : @1,
+		(__bridge NSString *)kCFNetworkProxiesHTTPProxy : testHost,
+		(__bridge NSString *)kCFNetworkProxiesHTTPPort : testPort
+	};
+
+	NSURL *url = [NSURL URLWithString:@"https://ymuu.me/"];
+	NSURLRequest *request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:8.0];
 	NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
 
 	NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
 		dispatch_async(dispatch_get_main_queue(), ^{
-			NSString *title = @"Applied";
 			NSString *message = nil;
-			if (error) {
-				message = [NSString stringWithFormat:@"Proxy applied — not reachable ✗\n%@", error.localizedDescription];
+			if (!error) {
+				message = [NSString stringWithFormat:@"Connected through %@", displayHostPort];
+			} else if ([error.domain isEqualToString:NSURLErrorDomain] &&
+					   (error.code == NSURLErrorCannotConnectToHost ||
+						error.code == NSURLErrorTimedOut ||
+						error.code == NSURLErrorCannotFindHost ||
+						error.code == NSURLErrorNetworkConnectionLost)) {
+				message = [NSString stringWithFormat:@"Proxy %@ not reachable", displayHostPort];
 			} else {
-				NSInteger status = 0;
-				if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
-					status = ((NSHTTPURLResponse *)response).statusCode;
-				}
-				NSString *body = @"";
-				if (data) {
-					body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
-				}
-				if (status == 200 && [body containsString:@"Success"]) {
-					message = @"Proxy applied — connected ✓";
-				} else {
-					message = [NSString stringWithFormat:@"Proxy applied — not reachable ✗\nHTTP %ld", (long)status];
-				}
+				message = [NSString stringWithFormat:@"Applied, but the check failed: %@", error.localizedDescription];
 			}
-			UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
+			UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Apply" message:message preferredStyle:UIAlertControllerStyleAlert];
 			[alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
 			[self presentViewController:alert animated:YES completion:nil];
 		});
@@ -272,47 +391,120 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 	[super tableView:tableView didSelectRowAtIndexPath:indexPath];
 }
 
-- (BOOL)tableView:(UITableView *)tableView canEditRowAtIndexPath:(NSIndexPath *)indexPath {
+- (UIContextMenuConfiguration *)tableView:(UITableView *)tableView contextMenuConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath point:(CGPoint)point {
 	PSSpecifier *specifier = [self specifierAtIndexPath:indexPath];
-	return [[specifier propertyForKey:kProfileKey] boolValue] && ![[specifier propertyForKey:kManualKey] boolValue];
-}
-
-- (UITableViewCellEditingStyle)tableView:(UITableView *)tableView editingStyleForRowAtIndexPath:(NSIndexPath *)indexPath {
-	return UITableViewCellEditingStyleNone;
-}
-
-- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
-	PSSpecifier *specifier = [self specifierAtIndexPath:indexPath];
-	if (![[specifier propertyForKey:kProfileKey] boolValue] || [[specifier propertyForKey:kManualKey] boolValue]) {
+	if (![[specifier propertyForKey:kProfileKey] boolValue] ||
+		[[specifier propertyForKey:kManualKey] boolValue]) {
 		return nil;
 	}
-
 	NSInteger index = [[specifier propertyForKey:kProfileIndexKey] integerValue];
+	if (index < 0) { return nil; }
 
-	UIContextualAction *deleteAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
-																			 title:@"Delete"
-																		   handler:^(UIContextualAction *action, __kindof UIView *sourceView, void (^completionHandler)(BOOL)) {
-		[MBRootListController deleteProfileAtIndex:index];
-		[self reloadSpecifiers];
-		completionHandler(YES);
+	return [UIContextMenuConfiguration configurationWithIdentifier:nil
+											   previewProvider:nil
+												actionProvider:^UIMenu *(NSArray<UIMenuElement *> *suggestedActions) {
+		UIAction *edit = [UIAction actionWithTitle:@"Edit"
+										 image:nil
+								  identifier:nil
+									 handler:^(__kindof UIAction *action) {
+			[self editProfile:specifier];
+		}];
+		UIAction *delete = [UIAction actionWithTitle:@"Delete"
+										   image:nil
+									identifier:nil
+								  attributes:UIMenuElementAttributesDestructive
+									 handler:^(__kindof UIAction *action) {
+			[MBRootListController deleteProfileAtIndex:index];
+			[self reloadSpecifiers];
+		}];
+		return [UIMenu menuWithTitle:@"" children:@[edit, delete]];
 	}];
+}
 
-	UIContextualAction *editAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal
-																			 title:@"Edit"
-																		   handler:^(UIContextualAction *action, __kindof UIView *sourceView, void (^completionHandler)(BOOL)) {
-		[self editProfile:specifier];
-		completionHandler(YES);
-	}];
+- (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section {
+	if (section != [self numberOfGroups] - 1) { return nil; }
 
-	return [UISwipeActionsConfiguration configurationWithActions:@[deleteAction, editAction]];
+	CGFloat width = tableView.bounds.size.width;
+	if (width < 1) { width = CGRectGetWidth([[UIScreen mainScreen] bounds]); }
+
+	UIView *container = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 72)];
+
+	NSBundle *bundle = [NSBundle bundleForClass:[self class]];
+	NSDictionary *info = bundle.infoDictionary;
+	NSString *version = info[@"CFBundleShortVersionString"] ?: @"0.1-dev";
+	NSString *build = info[@"CFBundleVersion"] ?: @"0";
+	NSString *labelText = [NSString stringWithFormat:@"ProxySwitcher-ng %@ (build %@)", version, build];
+
+	UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(16, 8, width - 32, 20)];
+	label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+	label.textColor = [UIColor secondaryLabelColor];
+	label.text = labelText;
+	[container addSubview:label];
+
+	UIButton *github = [self iconButtonNamed:@"github" URLString:@"https://github.com/ymuuuu"];
+	github.frame = CGRectMake(16, 36, 24, 24);
+	[container addSubview:github];
+
+	UIButton *website = [self iconButtonNamed:@"website" URLString:@"https://ymuu.me"];
+	website.frame = CGRectMake(48, 36, 24, 24);
+	[container addSubview:website];
+
+	return container;
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section {
+	if (section == [self numberOfGroups] - 1) { return 72; }
+	return UITableViewAutomaticDimension;
+}
+
+- (UIButton *)iconButtonNamed:(NSString *)name URLString:(NSString *)URLString {
+	NSBundle *bundle = [NSBundle bundleForClass:[self class]];
+	UIImage *image = [UIImage imageNamed:name inBundle:bundle compatibleWithTraitCollection:nil];
+	if (image) {
+		image = [image imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+	}
+	UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+	[button setImage:image forState:UIControlStateNormal];
+	button.tintColor = [UIColor secondaryLabelColor];
+	[button addTarget:self action:@selector(openLink:) forControlEvents:UIControlEventTouchUpInside];
+	objc_setAssociatedObject(button, &kLinkURLKey, URLString, OBJC_ASSOCIATION_COPY_NONATOMIC);
+	return button;
+}
+
+- (void)openLink:(UIButton *)sender {
+	NSString *URLString = objc_getAssociatedObject(sender, &kLinkURLKey);
+	NSURL *url = [NSURL URLWithString:URLString];
+	if (url) {
+		[[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+	}
 }
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
 	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Apply"
-																		  style:UIBarButtonItemStylePlain
-																		 target:self
-																		 action:@selector(applyAndVerify:)];
+																	  style:UIBarButtonItemStylePlain
+																	 target:self
+																	 action:@selector(applyAndVerify:)];
+	self.navigationItem.rightBarButtonItem.enabled = [MBRootListController isEnabled];
+
+	CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+									(__bridge void *)self,
+									PSApplyButtonStateChanged,
+									(__bridge CFStringRef)kSettingsChangedNotification,
+									NULL,
+									CFNotificationSuspensionBehaviorDeliverImmediately);
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+	[super viewWillAppear:animated];
+	self.navigationItem.rightBarButtonItem.enabled = [MBRootListController isEnabled];
+}
+
+- (void)dealloc {
+	CFNotificationCenterRemoveObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+									  (__bridge void *)self,
+									  (__bridge CFStringRef)kSettingsChangedNotification,
+									  NULL);
 }
 
 @end

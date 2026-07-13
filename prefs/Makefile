@@ -10,7 +10,7 @@ include $(THEOS)/makefiles/common.mk
 BUNDLE_NAME = ProxySwitcherNG
 
 ProxySwitcherNG_FILES = MBRootListController.m MBProfileEditController.m MBLogsController.m
-ProxySwitcherNG_FRAMEWORKS = UIKit
+ProxySwitcherNG_FRAMEWORKS = UIKit CFNetwork
 ProxySwitcherNG_PRIVATE_FRAMEWORKS = Preferences
 ProxySwitcherNG_INSTALL_PATH = /Library/PreferenceBundles
 ProxySwitcherNG_CFLAGS = -fobjc-arc

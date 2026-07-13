@@ -7,6 +7,7 @@
 
 + (NSString *)activeProxy;
 + (void)setActiveProxy:(NSString *)activeProxy;
++ (BOOL)isEnabled;
 + (void)postSettingsChanged;
 
 + (void)addOrUpdateProfile:(NSDictionary *)profile atIndex:(NSInteger)index;

@@ -126,7 +126,11 @@ static void PSFileLog(NSString *format, ...) {
 
     PSLog(@"[proxyswitcherngd] prefs source=%@ enabled=%@ server=%@ port=%@", source, enabled ?: @"(nil)", server ?: @"(nil)", port ?: @"(nil)");
 
-    if (activeProxy.length > 0) {
+    if ([activeProxy isEqualToString:@"__none__"]) {
+        PSLog(@"[proxyswitcherngd] activeProxy=__none__; forcing proxy off");
+        server = nil;
+        port = nil;
+    } else if (activeProxy.length > 0) {
         NSString *pHost = nil; NSNumber *pPort = nil;
         if ([MBWiFiProxyHandler parseHostPort:activeProxy host:&pHost port:&pPort]) {
             PSLog(@"[proxyswitcherngd] activeProxy=%@ -> server=%@ port=%@", activeProxy, pHost, pPort);
