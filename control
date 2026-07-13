@@ -2,7 +2,7 @@ Package: io.ymuu.proxyswitcherng
 Name: ProxySwitcher-ng
 Version: 0.1-dev
 Architecture: iphoneos-arm64
-Description: Toggle the Wi-Fi HTTP/HTTPS proxy and switch between saved proxy profiles from Settings — for on-device traffic intercept / pentest. Rootless / roothide.
+Description: Toggle the Wi-Fi HTTP/HTTPS proxy and switch between saved proxy profiles, straight from Settings. Built for on-device traffic intercept and pentest. Rootless and roothide.
 Maintainer: ymuu
 Author: ymuu
 Section: Tweaks
