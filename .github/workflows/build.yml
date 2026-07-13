@@ -28,11 +28,15 @@ jobs:
         run: |
           set -euo pipefail
           # Xcode's public SDK has no Preferences.framework; pull one patched SDK.
-          git clone -n --depth=1 --filter=tree:0 https://github.com/theos/sdks "$THEOS/sdks"
-          cd "$THEOS/sdks"
+          # theos already ships an (empty) sdks dir, so clone to a temp and move in.
+          TMP=$(mktemp -d)
+          git clone -n --depth=1 --filter=tree:0 https://github.com/theos/sdks "$TMP/sdks"
+          cd "$TMP/sdks"
           git sparse-checkout set --no-cone iPhoneOS16.5.sdk
           git checkout
-          ls -d */ | head
+          mkdir -p "$THEOS/sdks"
+          mv iPhoneOS16.5.sdk "$THEOS/sdks/"
+          ls -d "$THEOS/sdks/"*/ | head
 
       - name: Build package
         run: |
