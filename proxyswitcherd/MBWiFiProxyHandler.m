@@ -2,6 +2,45 @@
 #import "SCNetworkHeader.h"
 #import <CoreFoundation/CoreFoundation.h>
 
+static NSString * const kLogPath = @"/var/mobile/Library/Logs/ProxySwitcherNG.log";
+static BOOL gLoggingEnabled = NO;
+
+static void PSAppendFileLog(NSString *line) {
+    if (line.length == 0) { return; }
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *dir = [kLogPath stringByDeletingLastPathComponent];
+    if (![fm fileExistsAtPath:dir]) {
+        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ssZZZZZ"];
+    NSString *timestamp = [formatter stringFromDate:[NSDate date]];
+    NSString *entry = [NSString stringWithFormat:@"%@ %@\n", timestamp, line];
+
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:kLogPath];
+    if (handle) {
+        [handle seekToEndOfFile];
+        [handle writeData:[entry dataUsingEncoding:NSUTF8StringEncoding]];
+        [handle closeFile];
+    } else {
+        [entry writeToFile:kLogPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    }
+    [fm setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:kLogPath error:nil];
+}
+
+static void PSFileLog(NSString *format, ...) {
+    if (!gLoggingEnabled || !format) { return; }
+    va_list args;
+    va_start(args, format);
+    NSString *line = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+    PSAppendFileLog(line);
+}
+
+#define PSLog(format, ...) do { NSLog((format), ##__VA_ARGS__); PSFileLog((format), ##__VA_ARGS__); } while(0)
+
 @interface NSDictionary<KeyType, ObjectType> (Getters)
 
 - (nullable NSString *)stringForKeySafely:(nullable KeyType)key;
@@ -60,7 +99,6 @@
     CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 
     NSNumber *enabled = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("enabled"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-    NSNumber *type = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("type"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     NSString *server = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("server"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     // PSEditTextCell stores the port as an NSString; SCPreferences requires a
     // CFNumber for HTTPPort/HTTPSPort. Coerce so we never write a string (which
@@ -68,53 +106,55 @@
     // string later (which crashes).
     NSNumber *port = [self asNumber:(__bridge_transfer id)CFPreferencesCopyValue(CFSTR("port"), appID, CFSTR("mobile"), kCFPreferencesAnyHost)];
     NSString *activeProxy = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("activeProxy"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *logging = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("logging"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 
     NSString *source = @"cfprefsd";
-    if (!enabled && !type && !server && !port && !activeProxy) {
+    if (!enabled && !server && !port && !activeProxy) {
         source = @"fallback-file";
         NSDictionary *preferences = [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/io.ymuu.proxyswitcherng.plist"];
         if (!preferences) {
             preferences = @{};
         }
         enabled = [preferences objectForKey:@"enabled"];
-        type = [preferences objectForKey:@"type"];
         server = [preferences stringForKeySafely:@"server"];
         port = [preferences numberForKeySafely:@"port"];
         activeProxy = [preferences stringForKeySafely:@"activeProxy"];
+        logging = [preferences objectForKey:@"logging"];
     }
 
-    NSLog(@"[proxyswitcherngd] prefs source=%@ enabled=%@ type=%@ server=%@ port=%@", source, enabled ?: @"(nil)", type ?: @"(nil)", server ?: @"(nil)", port ?: @"(nil)");
+    gLoggingEnabled = logging ? [logging boolValue] : NO;
+
+    PSLog(@"[proxyswitcherngd] prefs source=%@ enabled=%@ server=%@ port=%@", source, enabled ?: @"(nil)", server ?: @"(nil)", port ?: @"(nil)");
 
     if (activeProxy.length > 0) {
         NSString *pHost = nil; NSNumber *pPort = nil;
         if ([MBWiFiProxyHandler parseHostPort:activeProxy host:&pHost port:&pPort]) {
-            NSLog(@"[proxyswitcherngd] activeProxy=%@ -> server=%@ port=%@", activeProxy, pHost, pPort);
+            PSLog(@"[proxyswitcherngd] activeProxy=%@ -> server=%@ port=%@", activeProxy, pHost, pPort);
             server = pHost;
             port = pPort;
         } else {
-            NSLog(@"[proxyswitcherngd] activeProxy=%@ malformed; using manual server/port", activeProxy);
+            PSLog(@"[proxyswitcherngd] activeProxy=%@ malformed; using manual server/port", activeProxy);
         }
     }
 
     BOOL enabledBool = enabled ? [enabled boolValue] : YES;
-    NSInteger typeInt = type ? [type integerValue] : 0;
-    BOOL shouldEnable = enabledBool && (typeInt == 1) && (server.length > 0) && (port != nil);
+    BOOL shouldEnable = enabledBool && (server.length > 0) && (port != nil);
     [self updateProxy:shouldEnable server:server port:port];
 }
 
 - (void)updateProxy:(BOOL)enabled server:(NSString *)server port:(NSNumber *)port {
-    NSLog(@"[proxyswitcherngd] applyFromPreferences: enabled=%d server=%@ port=%@", enabled, server ?: @"(nil)", port ?: @"(nil)");
+    PSLog(@"[proxyswitcherngd] applyFromPreferences: enabled=%d server=%@ port=%@", enabled, server ?: @"(nil)", port ?: @"(nil)");
 
     SCPreferencesRef prefs = SCPreferencesCreate(NULL, CFSTR("proxyswitcherngd"), NULL);
     if (prefs == NULL) {
-        NSLog(@"[proxyswitcherngd] SCPreferencesCreate returned NULL");
+        PSLog(@"[proxyswitcherngd] SCPreferencesCreate returned NULL");
         [self logSCError:@"SCPreferencesCreate"];
         return;
     }
     NSLog(@"[proxyswitcherngd] SCPreferencesCreate returned non-NULL prefs");
 
     Boolean locked = SCPreferencesLock(prefs, true);
-    NSLog(@"[proxyswitcherngd] SCPreferencesLock returned %s", locked ? "true" : "false");
+    PSLog(@"[proxyswitcherngd] SCPreferencesLock returned %s", locked ? "true" : "false");
     if (!locked) {
         [self logSCError:@"SCPreferencesLock"];
     }
@@ -123,7 +163,7 @@
     if (wifiServiceKey == nil) {
         if (locked) {
             Boolean unlocked = SCPreferencesUnlock(prefs);
-            NSLog(@"[proxyswitcherngd] SCPreferencesUnlock returned %s", unlocked ? "true" : "false");
+            PSLog(@"[proxyswitcherngd] SCPreferencesUnlock returned %s", unlocked ? "true" : "false");
             if (!unlocked) { [self logSCError:@"SCPreferencesUnlock"]; }
         }
         CFRelease(prefs);
@@ -132,11 +172,11 @@
 
     CFPropertyListRef servicesCF = SCPreferencesGetValue(prefs, kSCPrefNetworkServices);
     if (servicesCF == NULL) {
-        NSLog(@"[proxyswitcherngd] SCPreferencesGetValue(prefs, kSCPrefNetworkServices) returned NULL");
+        PSLog(@"[proxyswitcherngd] SCPreferencesGetValue(prefs, kSCPrefNetworkServices) returned NULL");
         [self logSCError:@"SCPreferencesGetValue(kSCPrefNetworkServices)"];
         if (locked) {
             Boolean unlocked = SCPreferencesUnlock(prefs);
-            NSLog(@"[proxyswitcherngd] SCPreferencesUnlock returned %s", unlocked ? "true" : "false");
+            PSLog(@"[proxyswitcherngd] SCPreferencesUnlock returned %s", unlocked ? "true" : "false");
             if (!unlocked) { [self logSCError:@"SCPreferencesUnlock"]; }
         }
         CFRelease(prefs);
@@ -148,10 +188,10 @@
     NSMutableDictionary *nservices = [self deepCopyServices:services];
     NSMutableDictionary *proxies = nservices[wifiServiceKey][cfs2nss(kSCEntNetProxies)];
     if (proxies == nil) {
-        NSLog(@"[proxyswitcherngd] Wi-Fi service has no Proxies dict; aborting");
+        PSLog(@"[proxyswitcherngd] Wi-Fi service has no Proxies dict; aborting");
         if (locked) {
             Boolean unlocked = SCPreferencesUnlock(prefs);
-            NSLog(@"[proxyswitcherngd] SCPreferencesUnlock returned %s", unlocked ? "true" : "false");
+            PSLog(@"[proxyswitcherngd] SCPreferencesUnlock returned %s", unlocked ? "true" : "false");
             if (!unlocked) { [self logSCError:@"SCPreferencesUnlock"]; }
         }
         CFRelease(prefs);
@@ -163,9 +203,9 @@
     BOOL shouldWrite = NO;
     if (enabled) {
         if (![self shouldChangeProxyDict:proxies withServer:server port:port]) {
-            NSLog(@"[proxyswitcherngd] proxy state already matches desired state; skipping write");
+            PSLog(@"[proxyswitcherngd] proxy state already matches desired state; skipping write");
         } else {
-            NSLog(@"[proxyswitcherngd] setting proxy server=%@ port=%@", server, port);
+            PSLog(@"[proxyswitcherngd] setting proxy server=%@ port=%@", server, port);
             proxies[cfs2nss(kSCPropNetProxiesHTTPEnable)] = @(1);
             proxies[cfs2nss(kSCPropNetProxiesHTTPProxy)] = server;
             proxies[cfs2nss(kSCPropNetProxiesHTTPPort)] = port;
@@ -176,9 +216,9 @@
         }
     } else {
         if (proxies.count == 0) {
-            NSLog(@"[proxyswitcherngd] proxy already cleared; skipping write");
+            PSLog(@"[proxyswitcherngd] proxy already cleared; skipping write");
         } else {
-            NSLog(@"[proxyswitcherngd] clearing all proxy entries");
+            PSLog(@"[proxyswitcherngd] clearing all proxy entries");
             [proxies removeAllObjects];
             shouldWrite = YES;
         }
@@ -186,26 +226,26 @@
 
     if (shouldWrite) {
         Boolean setOk = SCPreferencesSetValue(prefs, kSCPrefNetworkServices, (__bridge CFPropertyListRef)nservices);
-        NSLog(@"[proxyswitcherngd] SCPreferencesSetValue returned %s", setOk ? "true" : "false");
+        PSLog(@"[proxyswitcherngd] SCPreferencesSetValue returned %s", setOk ? "true" : "false");
         if (!setOk) { [self logSCError:@"SCPreferencesSetValue"]; }
 
         Boolean commitOk = SCPreferencesCommitChanges(prefs);
-        NSLog(@"[proxyswitcherngd] SCPreferencesCommitChanges returned %s", commitOk ? "true" : "false");
+        PSLog(@"[proxyswitcherngd] SCPreferencesCommitChanges returned %s", commitOk ? "true" : "false");
         if (!commitOk) { [self logSCError:@"SCPreferencesCommitChanges"]; }
 
         Boolean applyOk = SCPreferencesApplyChanges(prefs);
-        NSLog(@"[proxyswitcherngd] SCPreferencesApplyChanges returned %s", applyOk ? "true" : "false");
+        PSLog(@"[proxyswitcherngd] SCPreferencesApplyChanges returned %s", applyOk ? "true" : "false");
         if (!applyOk) { [self logSCError:@"SCPreferencesApplyChanges"]; }
     }
 
     if (locked) {
         Boolean unlocked = SCPreferencesUnlock(prefs);
-        NSLog(@"[proxyswitcherngd] SCPreferencesUnlock returned %s", unlocked ? "true" : "false");
+        PSLog(@"[proxyswitcherngd] SCPreferencesUnlock returned %s", unlocked ? "true" : "false");
         if (!unlocked) { [self logSCError:@"SCPreferencesUnlock"]; }
     }
 
     CFRelease(prefs);
-    NSLog(@"[proxyswitcherngd] applyFromPreferences complete");
+    PSLog(@"[proxyswitcherngd] applyFromPreferences complete");
 }
 
 #pragma mark - Helpers
@@ -213,7 +253,7 @@
 - (void)logSCError:(NSString *)callName {
     int err = SCError();
     const char *errStr = SCErrorString(err);
-    NSLog(@"[proxyswitcherngd] %@ failed: SCError=%d (%s)", callName, err, errStr ? errStr : "(null)");
+    PSLog(@"[proxyswitcherngd] %@ failed: SCError=%d (%s)", callName, err, errStr ? errStr : "(null)");
 }
 
 - (BOOL)isWiFiServiceByInterface:(NSDictionary *)service {
@@ -236,7 +276,7 @@
 - (NSString *)findWiFiServiceKey:(SCPreferencesRef)prefs {
     CFStringRef currentSetPath = SCPreferencesGetValue(prefs, kSCPrefCurrentSet);
     if (currentSetPath == NULL) {
-        NSLog(@"[proxyswitcherngd] SCPreferencesGetValue(prefs, kSCPrefCurrentSet) returned NULL");
+        PSLog(@"[proxyswitcherngd] SCPreferencesGetValue(prefs, kSCPrefCurrentSet) returned NULL");
         [self logSCError:@"SCPreferencesGetValue(kSCPrefCurrentSet)"];
         return nil;
     }
@@ -244,7 +284,7 @@
 
     CFDictionaryRef currentSetCF = SCPreferencesPathGetValue(prefs, currentSetPath);
     if (currentSetCF == NULL) {
-        NSLog(@"[proxyswitcherngd] SCPreferencesPathGetValue(prefs, currentSetPath) returned NULL");
+        PSLog(@"[proxyswitcherngd] SCPreferencesPathGetValue(prefs, currentSetPath) returned NULL");
         [self logSCError:@"SCPreferencesPathGetValue"];
         return nil;
     }
@@ -256,7 +296,7 @@
 
     CFPropertyListRef servicesCF = SCPreferencesGetValue(prefs, kSCPrefNetworkServices);
     if (servicesCF == NULL) {
-        NSLog(@"[proxyswitcherngd] SCPreferencesGetValue(prefs, kSCPrefNetworkServices) returned NULL");
+        PSLog(@"[proxyswitcherngd] SCPreferencesGetValue(prefs, kSCPrefNetworkServices) returned NULL");
         [self logSCError:@"SCPreferencesGetValue(kSCPrefNetworkServices)"];
         return nil;
     }
@@ -275,7 +315,7 @@
             return key;
         }
     }
-    NSLog(@"[proxyswitcherngd] no Wi-Fi service found in current set by interface (Hardware=AirPort or Type=IEEE80211)");
+    PSLog(@"[proxyswitcherngd] no Wi-Fi service found in current set by interface (Hardware=AirPort or Type=IEEE80211)");
     return nil;
 }
 

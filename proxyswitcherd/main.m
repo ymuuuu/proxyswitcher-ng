@@ -32,6 +32,17 @@ static int PSRunSelfTest(void) {
     return fails ? 1 : 0;
 }
 
+static void clearLog(CFNotificationCenterRef center,
+                     void *observer,
+                     CFStringRef name,
+                     const void *object,
+                     CFDictionaryRef userInfo) {
+    NSString *path = @"/var/mobile/Library/Logs/ProxySwitcherNG.log";
+    [@"" writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    [[NSFileManager defaultManager] setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:path error:nil];
+    NSLog(@"[proxyswitcherngd] cleared log file");
+}
+
 static void settingsChanged(CFNotificationCenterRef center,
                             void *observer,
                             CFStringRef name,
@@ -66,6 +77,12 @@ int main(int argc, char **argv, char **envp) {
                                     NULL,
                                     networkChanged,
                                     CFSTR("com.apple.system.config.network_change"),
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorCoalesce);
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                    NULL,
+                                    clearLog,
+                                    CFSTR("io.ymuu.proxyswitcherng/clearlog"),
                                     NULL,
                                     CFNotificationSuspensionBehaviorCoalesce);
 
