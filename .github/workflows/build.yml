@@ -41,6 +41,9 @@ jobs:
       - name: Build package
         run: |
           set -euo pipefail
+          BUILD="${{ github.run_number }}"
+          /usr/bin/sed -i '' "s/^Version: 0.1-dev$/Version: 0.1-dev.$BUILD/" control
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" prefs/Resources/Info.plist
           make clean || true
           make package FINALPACKAGE=1
 

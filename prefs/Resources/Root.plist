@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>title</key>
-	<string>ProxySwitcher</string>
+	<string>ProxySwitcher-ng</string>
 	<key>items</key>
 	<array>
 		<dict>
@@ -16,14 +16,6 @@
 			<key>defaults</key><string>io.ymuu.proxyswitcherng</string>
 			<key>key</key><string>enabled</string>
 			<key>label</key><string>Enabled</string>
-			<key>PostNotification</key><string>io.ymuu.proxyswitcherng/settingschanged</string>
-		</dict>
-		<dict>
-			<key>cell</key><string>PSSwitchCell</string>
-			<key>default</key><false/>
-			<key>defaults</key><string>io.ymuu.proxyswitcherng</string>
-			<key>key</key><string>type</string>
-			<key>label</key><string>Proxy</string>
 			<key>PostNotification</key><string>io.ymuu.proxyswitcherng/settingschanged</string>
 		</dict>
 		<dict>
@@ -48,6 +40,23 @@
 			<key>noAutoCorrect</key><true/>
 			<key>keyboard</key><string>NumberPad</string>
 			<key>PostNotification</key><string>io.ymuu.proxyswitcherng/settingschanged</string>
+		</dict>
+		<dict>
+			<key>cell</key><string>PSGroupCell</string>
+			<key>label</key><string>Diagnostics</string>
+		</dict>
+		<dict>
+			<key>cell</key><string>PSSwitchCell</string>
+			<key>default</key><false/>
+			<key>defaults</key><string>io.ymuu.proxyswitcherng</string>
+			<key>key</key><string>logging</string>
+			<key>label</key><string>Enable logging</string>
+			<key>PostNotification</key><string>io.ymuu.proxyswitcherng/settingschanged</string>
+		</dict>
+		<dict>
+			<key>cell</key><string>PSButtonCell</string>
+			<key>label</key><string>Logs</string>
+			<key>action</key><string>openLogs:</string>
 		</dict>
 	</array>
 </dict>

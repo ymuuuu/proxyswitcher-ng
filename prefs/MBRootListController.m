@@ -1,7 +1,9 @@
 #import "MBRootListController.h"
 #import "MBProfileEditController.h"
+#import "MBLogsController.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <Preferences/Preferences.h>
+#import <UIKit/UIKit.h>
 
 static NSString * const kPrefsDomain = @"io.ymuu.proxyswitcherng";
 static NSString * const kSettingsChangedNotification = @"io.ymuu.proxyswitcherng/settingschanged";
@@ -47,10 +49,10 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 
 + (void)postSettingsChanged {
 	CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
-															 (__bridge CFStringRef)kSettingsChangedNotification,
-															 NULL,
-															 NULL,
-															 YES);
+										 (__bridge CFStringRef)kSettingsChangedNotification,
+										 NULL,
+										 NULL,
+										 YES);
 }
 
 + (void)addOrUpdateProfile:(NSDictionary *)profile atIndex:(NSInteger)index {
@@ -95,9 +97,22 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 
 		NSArray *profiles = [MBRootListController readProfiles];
 		[_specifiers addObjectsFromArray:[self profileSpecifiersForProfiles:profiles]];
+		[_specifiers addObjectsFromArray:[self aboutSpecifiers]];
 	}
 
 	return _specifiers;
+}
+
+- (NSArray *)aboutSpecifiers {
+	NSBundle *bundle = [NSBundle bundleForClass:[self class]];
+	NSDictionary *info = bundle.infoDictionary;
+	NSString *version = info[@"CFBundleShortVersionString"] ?: @"0.1-dev";
+	NSString *build = info[@"CFBundleVersion"] ?: @"0";
+	NSString *footer = [NSString stringWithFormat:@"ProxySwitcher-ng %@ (build %@)", version, build];
+
+	PSSpecifier *group = [PSSpecifier groupSpecifierWithName:@"About"];
+	[group setProperty:footer forKey:PSFooterTextGroupKey];
+	return @[group];
 }
 
 - (NSArray *)profileSpecifiersForProfiles:(NSArray *)profiles {
@@ -108,12 +123,12 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 	[specifiers addObject:group];
 
 	PSSpecifier *manual = [PSSpecifier preferenceSpecifierNamed:@"Manual (Server/Port)"
-															target:self
-																set:NULL
-																get:NULL
-																detail:NULL
-																cell:PSButtonCell
-																edit:NULL];
+														target:self
+															set:NULL
+															get:NULL
+															detail:NULL
+															cell:PSButtonCell
+															edit:NULL];
 	manual->action = @selector(selectProfile:);
 	[manual setProperty:@(YES) forKey:kProfileKey];
 	[manual setProperty:@(YES) forKey:kManualKey];
@@ -134,12 +149,12 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 
 		NSString *title = [NSString stringWithFormat:@"%@ (%@)", name, value];
 		PSSpecifier *specifier = [PSSpecifier preferenceSpecifierNamed:title
-																	target:self
-																	set:NULL
-																	get:NULL
-																	detail:NULL
-																	cell:PSButtonCell
-																	edit:NULL];
+															  target:self
+																set:NULL
+																get:NULL
+																detail:NULL
+																cell:PSButtonCell
+																edit:NULL];
 		specifier->action = @selector(selectProfile:);
 		[specifier setProperty:@(YES) forKey:kProfileKey];
 		[specifier setProperty:@(NO) forKey:kManualKey];
@@ -149,12 +164,12 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 	}
 
 	PSSpecifier *add = [PSSpecifier preferenceSpecifierNamed:@"Add Profile…"
-															target:self
-																set:NULL
-																get:NULL
-																detail:NULL
-																cell:PSButtonCell
-																edit:NULL];
+													  target:self
+															 set:NULL
+															 get:NULL
+															detail:NULL
+															 cell:PSButtonCell
+															 edit:NULL];
 	add->action = @selector(addProfile:);
 	[specifiers addObject:add];
 
@@ -187,9 +202,47 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 	[self pushController:editController];
 }
 
-- (void)setEditing:(BOOL)editing animated:(BOOL)animated {
-	[super setEditing:editing animated:animated];
-	[self.tableView setEditing:editing animated:animated];
+- (void)openLogs:(PSSpecifier *)specifier {
+	MBLogsController *logsController = [[MBLogsController alloc] init];
+	[self pushController:logsController];
+}
+
+- (void)applyAndVerify:(id)sender {
+	[MBRootListController postSettingsChanged];
+
+	NSURL *url = [NSURL URLWithString:@"http://captive.apple.com/hotspot-detect.html"];
+	NSURLRequest *request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:5.0];
+	NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+	config.timeoutIntervalForRequest = 5.0;
+	NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
+
+	NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+		dispatch_async(dispatch_get_main_queue(), ^{
+			NSString *title = @"Applied";
+			NSString *message = nil;
+			if (error) {
+				message = [NSString stringWithFormat:@"Proxy applied — not reachable ✗\n%@", error.localizedDescription];
+			} else {
+				NSInteger status = 0;
+				if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
+					status = ((NSHTTPURLResponse *)response).statusCode;
+				}
+				NSString *body = @"";
+				if (data) {
+					body = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+				}
+				if (status == 200 && [body containsString:@"Success"]) {
+					message = @"Proxy applied — connected ✓";
+				} else {
+					message = [NSString stringWithFormat:@"Proxy applied — not reachable ✗\nHTTP %ld", (long)status];
+				}
+			}
+			UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
+			[alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+			[self presentViewController:alert animated:YES completion:nil];
+		});
+	}];
+	[task resume];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
@@ -204,12 +257,6 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
-	PSSpecifier *specifier = [self specifierAtIndexPath:indexPath];
-	if ([[specifier propertyForKey:kProfileKey] boolValue] && tableView.isEditing) {
-		[tableView deselectRowAtIndexPath:indexPath animated:YES];
-		[self editProfile:specifier];
-		return;
-	}
 	[super tableView:tableView didSelectRowAtIndexPath:indexPath];
 }
 
@@ -219,24 +266,41 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 }
 
 - (UITableViewCellEditingStyle)tableView:(UITableView *)tableView editingStyleForRowAtIndexPath:(NSIndexPath *)indexPath {
-	PSSpecifier *specifier = [self specifierAtIndexPath:indexPath];
-	if ([[specifier propertyForKey:kProfileKey] boolValue] && ![[specifier propertyForKey:kManualKey] boolValue]) {
-		return UITableViewCellEditingStyleDelete;
-	}
 	return UITableViewCellEditingStyleNone;
 }
 
-- (void)tableView:(UITableView *)tableView commitEditingStyle:(UITableViewCellEditingStyle)editingStyle forRowAtIndexPath:(NSIndexPath *)indexPath {
-	if (editingStyle != UITableViewCellEditingStyleDelete) { return; }
+- (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
 	PSSpecifier *specifier = [self specifierAtIndexPath:indexPath];
+	if (![[specifier propertyForKey:kProfileKey] boolValue] || [[specifier propertyForKey:kManualKey] boolValue]) {
+		return nil;
+	}
+
 	NSInteger index = [[specifier propertyForKey:kProfileIndexKey] integerValue];
-	[MBRootListController deleteProfileAtIndex:index];
-	[self reloadSpecifiers];
+
+	UIContextualAction *deleteAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleDestructive
+																			 title:@"Delete"
+																		   handler:^(UIContextualAction *action, __kindof UIView *sourceView, void (^completionHandler)(BOOL)) {
+		[MBRootListController deleteProfileAtIndex:index];
+		[self reloadSpecifiers];
+		completionHandler(YES);
+	}];
+
+	UIContextualAction *editAction = [UIContextualAction contextualActionWithStyle:UIContextualActionStyleNormal
+																			 title:@"Edit"
+																		   handler:^(UIContextualAction *action, __kindof UIView *sourceView, void (^completionHandler)(BOOL)) {
+		[self editProfile:specifier];
+		completionHandler(YES);
+	}];
+
+	return [UISwipeActionsConfiguration configurationWithActions:@[deleteAction, editAction]];
 }
 
 - (void)viewDidLoad {
 	[super viewDidLoad];
-	self.navigationItem.rightBarButtonItem = self.editButtonItem;
+	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Apply"
+																		  style:UIBarButtonItemStylePlain
+																		 target:self
+																		 action:@selector(applyAndVerify:)];
 }
 
 @end
