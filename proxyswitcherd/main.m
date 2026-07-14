@@ -1,9 +1,9 @@
-#import "MBWiFiProxyHandler.h"
+#import "PSNWiFiProxyHandler.h"
 #import <string.h>
 
 static BOOL PSExpect(NSString *input, BOOL wantOK, NSString *wantHost, int wantPort) {
     NSString *host = nil; NSNumber *port = nil;
-    BOOL ok = [MBWiFiProxyHandler parseHostPort:input host:&host port:&port];
+    BOOL ok = [PSNWiFiProxyHandler parseHostPort:input host:&host port:&port];
     BOOL pass = (ok == wantOK);
     if (ok && wantOK) {
         pass = pass && [host isEqualToString:wantHost] && (port.intValue == wantPort);
@@ -49,7 +49,7 @@ static void settingsChanged(CFNotificationCenterRef center,
                             const void *object,
                             CFDictionaryRef userInfo) {
     NSLog(@"[proxyswitcherngd] received notification: io.ymuu.proxyswitcherng/settingschanged");
-    [[MBWiFiProxyHandler sharedInstance] applyFromPreferences];
+    [[PSNWiFiProxyHandler sharedInstance] applyFromPreferences];
 }
 
 static void networkChanged(CFNotificationCenterRef center,
@@ -58,7 +58,7 @@ static void networkChanged(CFNotificationCenterRef center,
                            const void *object,
                            CFDictionaryRef userInfo) {
     NSLog(@"[proxyswitcherngd] received notification: com.apple.system.config.network_change");
-    [[MBWiFiProxyHandler sharedInstance] applyFromPreferences];
+    [[PSNWiFiProxyHandler sharedInstance] applyFromPreferences];
 }
 
 int main(int argc, char **argv, char **envp) {
@@ -86,7 +86,7 @@ int main(int argc, char **argv, char **envp) {
                                     NULL,
                                     CFNotificationSuspensionBehaviorCoalesce);
 
-    [[MBWiFiProxyHandler sharedInstance] applyFromPreferences];
+    [[PSNWiFiProxyHandler sharedInstance] applyFromPreferences];
 
     CFRunLoopRun();
     return 0;

@@ -1,4 +1,4 @@
-#import "MBWiFiProxyHandler.h"
+#import "PSNWiFiProxyHandler.h"
 #import "SCNetworkHeader.h"
 #import <CoreFoundation/CoreFoundation.h>
 
@@ -72,7 +72,7 @@ static void PSFileLog(NSString *format, ...) {
 
 @end
 
-@interface MBWiFiProxyHandler ()
+@interface PSNWiFiProxyHandler ()
 - (void)updateProxy:(BOOL)enabled server:(NSString *)server port:(NSNumber *)port;
 - (void)logSCError:(NSString *)callName;
 - (BOOL)isWiFiServiceByInterface:(NSDictionary *)service;
@@ -83,13 +83,13 @@ static void PSFileLog(NSString *format, ...) {
 - (NSNumber *)asNumber:(id)value;
 @end
 
-@implementation MBWiFiProxyHandler
+@implementation PSNWiFiProxyHandler
 
 + (instancetype)sharedInstance {
     static dispatch_once_t onceToken;
-    static MBWiFiProxyHandler *handler;
+    static PSNWiFiProxyHandler *handler;
     dispatch_once(&onceToken, ^{
-        handler = [[MBWiFiProxyHandler alloc] init];
+        handler = [[PSNWiFiProxyHandler alloc] init];
     });
     return handler;
 }
@@ -126,9 +126,13 @@ static void PSFileLog(NSString *format, ...) {
 
     PSLog(@"[proxyswitcherngd] prefs source=%@ enabled=%@ server=%@ port=%@", source, enabled ?: @"(nil)", server ?: @"(nil)", port ?: @"(nil)");
 
-    if (activeProxy.length > 0) {
+    if ([activeProxy isEqualToString:@"__none__"]) {
+        PSLog(@"[proxyswitcherngd] activeProxy=__none__; forcing proxy off");
+        server = nil;
+        port = nil;
+    } else if (activeProxy.length > 0) {
         NSString *pHost = nil; NSNumber *pPort = nil;
-        if ([MBWiFiProxyHandler parseHostPort:activeProxy host:&pHost port:&pPort]) {
+        if ([PSNWiFiProxyHandler parseHostPort:activeProxy host:&pHost port:&pPort]) {
             PSLog(@"[proxyswitcherngd] activeProxy=%@ -> server=%@ port=%@", activeProxy, pHost, pPort);
             server = pHost;
             port = pPort;

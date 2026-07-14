@@ -1,5 +1,5 @@
 #import <Preferences/PSViewController.h>
 
-@interface MBLogsController : PSViewController
+@interface PSNLogsController : PSViewController
 
 @end

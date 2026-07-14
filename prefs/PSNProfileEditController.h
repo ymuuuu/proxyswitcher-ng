@@ -1,6 +1,6 @@
 #import <Preferences/PSListController.h>
 
-@interface MBProfileEditController : PSListController
+@interface PSNProfileEditController : PSListController
 
 @property (nonatomic, assign) NSInteger profileIndex;
 @property (nonatomic, copy) NSDictionary *profile;

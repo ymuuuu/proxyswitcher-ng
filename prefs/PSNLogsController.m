@@ -1,15 +1,15 @@
-#import "MBLogsController.h"
+#import "PSNLogsController.h"
 #import <UIKit/UIKit.h>
 #import <CoreFoundation/CoreFoundation.h>
 
 static NSString * const kLogPath = @"/var/mobile/Library/Logs/ProxySwitcherNG.log";
 static NSString * const kClearLogNotification = @"io.ymuu.proxyswitcherng/clearlog";
 
-@interface MBLogsController ()
+@interface PSNLogsController ()
 @property (nonatomic, strong) UITextView *textView;
 @end
 
-@implementation MBLogsController
+@implementation PSNLogsController
 
 - (void)viewDidLoad {
 	[super viewDidLoad];

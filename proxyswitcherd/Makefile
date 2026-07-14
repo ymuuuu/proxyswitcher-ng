@@ -6,7 +6,7 @@ TOOL_NAME = proxyswitcherngd
 # refuses to exec ("Bad CPU type in executable"). A plain arm64 process is not
 # injected into an arm64e host, so it has no arm64e requirement and runs fine.
 proxyswitcherngd_ARCHS = arm64
-proxyswitcherngd_FILES = main.m MBWiFiProxyHandler.m
+proxyswitcherngd_FILES = main.m PSNWiFiProxyHandler.m
 proxyswitcherngd_FRAMEWORKS = Foundation SystemConfiguration
 proxyswitcherngd_CODESIGN_FLAGS = -Sentitlements.plist
 proxyswitcherngd_INSTALL_PATH = /usr/bin
