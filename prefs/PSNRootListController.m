@@ -1,6 +1,6 @@
-#import "MBRootListController.h"
-#import "MBProfileEditController.h"
-#import "MBLogsController.h"
+#import "PSNRootListController.h"
+#import "PSNProfileEditController.h"
+#import "PSNLogsController.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
@@ -26,9 +26,9 @@ static NSString * const kProfileIndexKey = @"profileIndex";
 static char kLinkURLKey;
 
 static void PSApplyButtonStateChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-	MBRootListController *controller = (__bridge MBRootListController *)observer;
+	PSNRootListController *controller = (__bridge PSNRootListController *)observer;
 	dispatch_async(dispatch_get_main_queue(), ^{
-		controller.navigationItem.rightBarButtonItem.enabled = [MBRootListController isEnabled];
+		controller.navigationItem.rightBarButtonItem.enabled = [PSNRootListController isEnabled];
 	});
 }
 
@@ -114,7 +114,7 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 	return result;
 }
 
-@interface MBRootListController ()
+@interface PSNRootListController ()
 
 + (BOOL)parseHostPort:(NSString *)value host:(NSString **)outHost port:(NSNumber **)outPort;
 
@@ -123,7 +123,7 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 
 @end
 
-@implementation MBRootListController
+@implementation PSNRootListController
 
 + (NSArray *)readProfiles {
 	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
@@ -244,7 +244,7 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 			_specifiers = [NSMutableArray array];
 		}
 
-		NSArray *profiles = [MBRootListController readProfiles];
+		NSArray *profiles = [PSNRootListController readProfiles];
 		NSArray *profileSpecs = [self profileSpecifiersForProfiles:profiles];
 
 		// Insert the Profiles section above the Diagnostics group so the final
@@ -346,13 +346,13 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 
 - (void)selectProfile:(PSSpecifier *)specifier {
 	NSString *value = [specifier propertyForKey:kProfileValueKey] ?: @"";
-	[MBRootListController setActiveProxy:value];
-	[MBRootListController postSettingsChanged];
+	[PSNRootListController setActiveProxy:value];
+	[PSNRootListController postSettingsChanged];
 	[self reloadSpecifiers];
 }
 
 - (void)addProfile:(PSSpecifier *)specifier {
-	MBProfileEditController *editController = [[MBProfileEditController alloc] init];
+	PSNProfileEditController *editController = [[PSNProfileEditController alloc] init];
 	editController.profileIndex = -1;
 	editController.profile = nil;
 	[self pushController:editController];
@@ -360,30 +360,30 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 
 - (void)editProfile:(PSSpecifier *)specifier {
 	NSInteger index = [[specifier propertyForKey:kProfileIndexKey] integerValue];
-	NSArray *profiles = [MBRootListController readProfiles];
+	NSArray *profiles = [PSNRootListController readProfiles];
 	if (index < 0 || index >= (NSInteger)profiles.count) { return; }
 	NSDictionary *profile = profiles[index];
 
-	MBProfileEditController *editController = [[MBProfileEditController alloc] init];
+	PSNProfileEditController *editController = [[PSNProfileEditController alloc] init];
 	editController.profileIndex = index;
 	editController.profile = profile;
 	[self pushController:editController];
 }
 
 - (void)openLogs:(PSSpecifier *)specifier {
-	MBLogsController *logsController = [[MBLogsController alloc] init];
+	PSNLogsController *logsController = [[PSNLogsController alloc] init];
 	[self pushController:logsController];
 }
 
 - (void)applyAndVerify:(id)sender {
-	if (![MBRootListController isEnabled]) {
-		[MBRootListController postSettingsChanged];
+	if (![PSNRootListController isEnabled]) {
+		[PSNRootListController postSettingsChanged];
 		return;
 	}
 
-	[MBRootListController postSettingsChanged];
+	[PSNRootListController postSettingsChanged];
 
-	NSString *activeProxy = [MBRootListController activeProxy] ?: @"";
+	NSString *activeProxy = [PSNRootListController activeProxy] ?: @"";
 	NSString *testHost = nil;
 	NSNumber *testPort = nil;
 
@@ -396,7 +396,7 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 		return;
 	}
 
-	if ([MBRootListController parseHostPort:activeProxy host:&testHost port:&testPort]) {
+	if ([PSNRootListController parseHostPort:activeProxy host:&testHost port:&testPort]) {
 		// Real profile selected: use its host:port.
 	} else {
 		// Manual mode: read server and port from prefs.
@@ -461,7 +461,7 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 	PSSpecifier *specifier = [self specifierAtIndexPath:indexPath];
 	if ([[specifier propertyForKey:kProfileKey] boolValue]) {
 		NSString *value = [specifier propertyForKey:kProfileValueKey] ?: @"";
-		NSString *activeProxy = [MBRootListController activeProxy] ?: @"";
+		NSString *activeProxy = [PSNRootListController activeProxy] ?: @"";
 		cell.accessoryType = [value isEqualToString:activeProxy] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
 	}
 	return cell;
@@ -493,7 +493,7 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 										   image:nil
 									identifier:nil
 									 handler:^(__kindof UIAction *action) {
-			[MBRootListController deleteProfileAtIndex:index];
+			[PSNRootListController deleteProfileAtIndex:index];
 			[self reloadSpecifiers];
 		}];
 		delete.attributes = UIMenuElementAttributesDestructive;
@@ -565,7 +565,7 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 																	  style:UIBarButtonItemStylePlain
 																	 target:self
 																	 action:@selector(applyAndVerify:)];
-	self.navigationItem.rightBarButtonItem.enabled = [MBRootListController isEnabled];
+	self.navigationItem.rightBarButtonItem.enabled = [PSNRootListController isEnabled];
 
 	CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
 									(__bridge void *)self,
@@ -577,7 +577,7 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 
 - (void)viewWillAppear:(BOOL)animated {
 	[super viewWillAppear:animated];
-	self.navigationItem.rightBarButtonItem.enabled = [MBRootListController isEnabled];
+	self.navigationItem.rightBarButtonItem.enabled = [PSNRootListController isEnabled];
 }
 
 - (void)dealloc {

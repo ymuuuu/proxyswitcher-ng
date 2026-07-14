@@ -9,7 +9,7 @@ include $(THEOS)/makefiles/common.mk
 
 BUNDLE_NAME = ProxySwitcherNG
 
-ProxySwitcherNG_FILES = MBRootListController.m MBProfileEditController.m MBLogsController.m
+ProxySwitcherNG_FILES = PSNRootListController.m PSNProfileEditController.m PSNLogsController.m
 ProxySwitcherNG_FRAMEWORKS = UIKit
 ProxySwitcherNG_PRIVATE_FRAMEWORKS = Preferences
 ProxySwitcherNG_INSTALL_PATH = /Library/PreferenceBundles

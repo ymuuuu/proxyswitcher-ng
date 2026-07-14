@@ -1,6 +1,6 @@
 #import <Preferences/PSListController.h>
 
-@interface MBRootListController : PSListController
+@interface PSNRootListController : PSListController
 
 + (NSArray *)readProfiles;
 + (void)writeProfiles:(NSArray *)profiles;

@@ -1,6 +1,6 @@
 #import <Foundation/Foundation.h>
 
-@interface MBWiFiProxyHandler : NSObject
+@interface PSNWiFiProxyHandler : NSObject
 
 + (instancetype)sharedInstance;
 - (void)applyFromPreferences;

@@ -1,5 +1,5 @@
-#import "MBProfileEditController.h"
-#import "MBRootListController.h"
+#import "PSNProfileEditController.h"
+#import "PSNRootListController.h"
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
 
@@ -7,13 +7,13 @@ static NSString * const kProfileEditNameKey = @"name";
 static NSString * const kProfileEditHostKey = @"host";
 static NSString * const kProfileEditPortKey = @"port";
 
-@interface MBProfileEditController ()
+@interface PSNProfileEditController ()
 @property (nonatomic, copy) NSString *nameValue;
 @property (nonatomic, copy) NSString *hostValue;
 @property (nonatomic, copy) NSString *portValue;
 @end
 
-@implementation MBProfileEditController
+@implementation PSNProfileEditController
 
 - (NSArray *)specifiers {
 	if (!_specifiers) {
@@ -134,7 +134,7 @@ static NSString * const kProfileEditPortKey = @"port";
 	NSString *value = [NSString stringWithFormat:@"%@:%d", host, port];
 	NSDictionary *profile = @{@"name": name, @"value": value};
 
-	[MBRootListController addOrUpdateProfile:profile atIndex:self.profileIndex];
+	[PSNRootListController addOrUpdateProfile:profile atIndex:self.profileIndex];
 
 	[self.navigationController popViewControllerAnimated:YES];
 }
