@@ -2,10 +2,17 @@
 #import "MBProfileEditController.h"
 #import "MBLogsController.h"
 #import <CoreFoundation/CoreFoundation.h>
-#import <CFNetwork/CFNetwork.h>
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <sys/socket.h>
+#import <sys/select.h>
+#import <sys/time.h>
+#import <netdb.h>
+#import <fcntl.h>
+#import <unistd.h>
+#import <errno.h>
+#import <string.h>
 
 static NSString * const kPrefsDomain = @"io.ymuu.proxyswitcherng";
 static NSString * const kSettingsChangedNotification = @"io.ymuu.proxyswitcherng/settingschanged";
@@ -23,6 +30,88 @@ static void PSApplyButtonStateChanged(CFNotificationCenterRef center, void *obse
 	dispatch_async(dispatch_get_main_queue(), ^{
 		controller.navigationItem.rightBarButtonItem.enabled = [MBRootListController isEnabled];
 	});
+}
+
+typedef NS_ENUM(NSInteger, PSProbeResult) {
+	PSProbeConnected = 0,
+	PSProbeRefused,
+	PSProbeTimeout,
+	PSProbeDNSFail,
+};
+
+// Raw TCP connect to host:port with a timeout. This actually exercises the
+// proxy endpoint (does something accept a connection there?), which is the real
+// question item 3 asks. An earlier NSURLSession probe against an https URL gave
+// false positives: when the proxy was down, the session silently fell back to a
+// direct connection to the test site and reported success.
+static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeout) {
+	struct addrinfo hints;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+
+	char portStr[16];
+	snprintf(portStr, sizeof(portStr), "%d", port);
+
+	struct addrinfo *res = NULL;
+	if (getaddrinfo(host.UTF8String, portStr, &hints, &res) != 0 || res == NULL) {
+		return PSProbeDNSFail;
+	}
+
+	PSProbeResult result = PSProbeRefused;
+	for (struct addrinfo *ai = res; ai != NULL; ai = ai->ai_next) {
+		int fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+		if (fd < 0) { continue; }
+
+		int flags = fcntl(fd, F_GETFL, 0);
+		fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+		int rc = connect(fd, ai->ai_addr, ai->ai_addrlen);
+		if (rc == 0) {
+			close(fd);
+			result = PSProbeConnected;
+			break;
+		}
+		if (errno != EINPROGRESS) {
+			close(fd);
+			result = PSProbeRefused;
+			continue;
+		}
+
+		fd_set wset;
+		FD_ZERO(&wset);
+		FD_SET(fd, &wset);
+		struct timeval tv;
+		tv.tv_sec = (long)timeout;
+		tv.tv_usec = (long)((timeout - (long)timeout) * 1000000);
+
+		int sel = select(fd + 1, NULL, &wset, NULL, &tv);
+		if (sel == 0) {
+			close(fd);
+			result = PSProbeTimeout;
+			continue;
+		}
+		if (sel < 0) {
+			close(fd);
+			result = PSProbeRefused;
+			continue;
+		}
+
+		int soErr = 0;
+		socklen_t len = sizeof(soErr);
+		if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soErr, &len) < 0 || soErr != 0) {
+			close(fd);
+			result = PSProbeRefused;
+			continue;
+		}
+
+		close(fd);
+		result = PSProbeConnected;
+		break;
+	}
+
+	freeaddrinfo(res);
+	return result;
 }
 
 @interface MBRootListController ()
@@ -338,42 +427,33 @@ static void PSApplyButtonStateChanged(CFNotificationCenterRef center, void *obse
 	}
 
 	NSString *displayHostPort = [NSString stringWithFormat:@"%@:%@", testHost, testPort];
+	NSString *hostCopy = testHost;
+	int portInt = testPort.intValue;
 
-	NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
-	config.timeoutIntervalForRequest = 8.0;
-	// Only the HTTP proxy keys are available on iOS (the HTTPS-specific keys are
-	// macOS only). On iOS NSURLSession routes HTTPS through the HTTP proxy via
-	// CONNECT, so these are enough to test the proxy against an https URL.
-	config.connectionProxyDictionary = @{
-		(__bridge NSString *)kCFNetworkProxiesHTTPEnable : @1,
-		(__bridge NSString *)kCFNetworkProxiesHTTPProxy : testHost,
-		(__bridge NSString *)kCFNetworkProxiesHTTPPort : testPort
-	};
-
-	NSURL *url = [NSURL URLWithString:@"https://ymuu.me/"];
-	NSURLRequest *request = [NSURLRequest requestWithURL:url cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:8.0];
-	NSURLSession *session = [NSURLSession sessionWithConfiguration:config];
-
-	NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+	dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+		PSProbeResult probe = PSProbeProxy(hostCopy, portInt, 8.0);
 		dispatch_async(dispatch_get_main_queue(), ^{
 			NSString *message = nil;
-			if (!error) {
-				message = [NSString stringWithFormat:@"Connected through %@", displayHostPort];
-			} else if ([error.domain isEqualToString:NSURLErrorDomain] &&
-					   (error.code == NSURLErrorCannotConnectToHost ||
-						error.code == NSURLErrorTimedOut ||
-						error.code == NSURLErrorCannotFindHost ||
-						error.code == NSURLErrorNetworkConnectionLost)) {
-				message = [NSString stringWithFormat:@"Proxy %@ not reachable", displayHostPort];
-			} else {
-				message = [NSString stringWithFormat:@"Applied, but the check failed: %@", error.localizedDescription];
+			switch (probe) {
+				case PSProbeConnected:
+					message = [NSString stringWithFormat:@"Connected to %@", displayHostPort];
+					break;
+				case PSProbeRefused:
+					message = [NSString stringWithFormat:@"%@ refused the connection. Is the proxy running?", displayHostPort];
+					break;
+				case PSProbeTimeout:
+					message = [NSString stringWithFormat:@"%@ timed out. Not reachable on this network.", displayHostPort];
+					break;
+				case PSProbeDNSFail:
+				default:
+					message = [NSString stringWithFormat:@"Could not resolve %@", hostCopy];
+					break;
 			}
 			UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Apply" message:message preferredStyle:UIAlertControllerStyleAlert];
 			[alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
 			[self presentViewController:alert animated:YES completion:nil];
 		});
-	}];
-	[task resume];
+	});
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
