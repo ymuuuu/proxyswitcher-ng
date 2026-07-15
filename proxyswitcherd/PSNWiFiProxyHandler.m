@@ -107,7 +107,7 @@ static void PSFileLog(NSString *format, ...) {
     NSNumber *port = [self asNumber:(__bridge_transfer id)CFPreferencesCopyValue(CFSTR("port"), appID, CFSTR("mobile"), kCFPreferencesAnyHost)];
     NSString *activeProxy = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("activeProxy"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     NSNumber *logging = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("logging"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-    NSString *proxyType = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("proxyType"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *useSocks = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("useSocks"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 
     NSString *source = @"cfprefsd";
     if (!enabled && !server && !port && !activeProxy) {
@@ -121,7 +121,7 @@ static void PSFileLog(NSString *format, ...) {
         port = [preferences numberForKeySafely:@"port"];
         activeProxy = [preferences stringForKeySafely:@"activeProxy"];
         logging = [preferences objectForKey:@"logging"];
-        proxyType = [preferences stringForKeySafely:@"proxyType"];
+        useSocks = [preferences numberForKeySafely:@"useSocks"];
     }
 
     gLoggingEnabled = logging ? [logging boolValue] : NO;
@@ -143,7 +143,7 @@ static void PSFileLog(NSString *format, ...) {
         }
     }
 
-    NSString *type = [proxyType isEqualToString:@"socks"] ? @"socks" : @"http";
+    NSString *type = [useSocks boolValue] ? @"socks" : @"http";
 
     BOOL enabledBool = enabled ? [enabled boolValue] : YES;
     BOOL shouldEnable = enabledBool && (server.length > 0) && (port != nil);

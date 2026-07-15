@@ -157,10 +157,9 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 }
 
-+ (void)setProxyType:(NSString *)type {
++ (void)setUseSocks:(BOOL)useSocks {
 	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
-	NSString *value = [type isEqualToString:@"socks"] ? @"socks" : @"http";
-	CFPreferencesSetValue(CFSTR("proxyType"), (__bridge CFPropertyListRef)(value), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFPreferencesSetValue(CFSTR("useSocks"), (__bridge CFPropertyListRef)(@(useSocks)), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 }
 
@@ -363,7 +362,7 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 	BOOL isManual = [[specifier propertyForKey:kManualKey] boolValue];
 	if (!isManual) {
 		NSString *type = [specifier propertyForKey:@"psnProfileType"] ?: @"http";
-		[PSNRootListController setProxyType:type];
+		[PSNRootListController setUseSocks:[type isEqualToString:@"socks"]];
 	}
 	[PSNRootListController postSettingsChanged];
 	[self reloadSpecifiers];

@@ -75,22 +75,20 @@ static NSString * const kProfileEditTypeKey = @"type";
 		[portSpec setProperty:@(YES) forKey:PSNumberKeyboardKey];
 		[portSpec setProperty:@"NumberPad" forKey:PSKeyboardTypeKey];
 
-		// Inline segmented control (HTTP | SOCKS). A PSLinkListCell was tried first
-		// but its detail controller (PSListItemsController) aborts inside the
-		// framework's -prepareSpecifiersMetadata when driven by a hand-built
-		// specifier (confirmed from a device crash log). PSSegmentCell renders the
-		// choice in the row with no detail controller, so that path never runs.
-		PSSpecifier *typeSpec = [PSSpecifier preferenceSpecifierNamed:@"Type"
+		// Plain switch: on = SOCKS, off = HTTP/HTTPS. Both PSLinkListCell (drills
+		// into a PSListItemsController that aborts on a hand-built specifier) and
+		// PSSegmentCell (renders blank) fail in this Preferences build; a
+		// PSSwitchCell is the same cell the Enabled/logging rows use and renders
+		// reliably. The get/set map the switch bool to the "http"/"socks" string.
+		PSSpecifier *typeSpec = [PSSpecifier preferenceSpecifierNamed:@"Use SOCKS proxy"
 																target:self
 																set:@selector(setPreferenceValue:specifier:)
 																get:@selector(readPreferenceValue:)
 																detail:NULL
-																cell:PSSegmentCell
+																cell:PSSwitchCell
 																edit:NULL];
 		[typeSpec setProperty:kProfileEditTypeKey forKey:PSKeyNameKey];
-		[typeSpec setProperty:self.typeValue forKey:PSDefaultValueKey];
-		[typeSpec setProperty:@[@"http", @"socks"] forKey:PSValidValuesKey];
-		[typeSpec setProperty:@[@"HTTP", @"SOCKS"] forKey:PSValidTitlesKey];
+		[typeSpec setProperty:@([self.typeValue isEqualToString:@"socks"]) forKey:PSDefaultValueKey];
 
 		_specifiers = [NSMutableArray arrayWithObjects:group, nameSpec, hostSpec, portSpec, typeSpec, nil];
 	}
@@ -103,7 +101,7 @@ static NSString * const kProfileEditTypeKey = @"type";
 	if ([key isEqualToString:kProfileEditNameKey]) { return self.nameValue ?: @""; }
 	if ([key isEqualToString:kProfileEditHostKey]) { return self.hostValue ?: @""; }
 	if ([key isEqualToString:kProfileEditPortKey]) { return self.portValue ?: @""; }
-	if ([key isEqualToString:kProfileEditTypeKey]) { return self.typeValue ?: @"http"; }
+	if ([key isEqualToString:kProfileEditTypeKey]) { return @([self.typeValue isEqualToString:@"socks"]); }
 	return nil;
 }
 
@@ -123,7 +121,7 @@ static NSString * const kProfileEditTypeKey = @"type";
 	} else if ([key isEqualToString:kProfileEditPortKey]) {
 		self.portValue = string;
 	} else if ([key isEqualToString:kProfileEditTypeKey]) {
-		self.typeValue = [string isEqualToString:@"socks"] ? @"socks" : @"http";
+		self.typeValue = [value boolValue] ? @"socks" : @"http";
 	}
 }
 
