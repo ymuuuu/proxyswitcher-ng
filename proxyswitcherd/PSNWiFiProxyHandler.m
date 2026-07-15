@@ -73,13 +73,13 @@ static void PSFileLog(NSString *format, ...) {
 @end
 
 @interface PSNWiFiProxyHandler ()
-- (void)updateProxy:(BOOL)enabled server:(NSString *)server port:(NSNumber *)port;
+- (void)updateProxy:(BOOL)enabled server:(NSString *)server port:(NSNumber *)port type:(NSString *)type;
 - (void)logSCError:(NSString *)callName;
 - (BOOL)isWiFiServiceByInterface:(NSDictionary *)service;
 - (NSString *)interfaceInfoString:(NSDictionary *)service;
 - (NSString *)findWiFiServiceKey:(SCPreferencesRef)prefs;
 - (NSMutableDictionary *)deepCopyServices:(NSDictionary *)services;
-- (BOOL)shouldChangeProxyDict:(NSDictionary *)proxyDict withServer:(NSString *)server port:(NSNumber *)port;
+- (BOOL)shouldChangeProxyDict:(NSDictionary *)proxyDict withServer:(NSString *)server port:(NSNumber *)port type:(NSString *)type;
 - (NSNumber *)asNumber:(id)value;
 @end
 
@@ -107,6 +107,7 @@ static void PSFileLog(NSString *format, ...) {
     NSNumber *port = [self asNumber:(__bridge_transfer id)CFPreferencesCopyValue(CFSTR("port"), appID, CFSTR("mobile"), kCFPreferencesAnyHost)];
     NSString *activeProxy = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("activeProxy"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     NSNumber *logging = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("logging"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *useSocks = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("useSocks"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 
     NSString *source = @"cfprefsd";
     if (!enabled && !server && !port && !activeProxy) {
@@ -120,6 +121,7 @@ static void PSFileLog(NSString *format, ...) {
         port = [preferences numberForKeySafely:@"port"];
         activeProxy = [preferences stringForKeySafely:@"activeProxy"];
         logging = [preferences objectForKey:@"logging"];
+        useSocks = [preferences numberForKeySafely:@"useSocks"];
     }
 
     gLoggingEnabled = logging ? [logging boolValue] : NO;
@@ -141,12 +143,14 @@ static void PSFileLog(NSString *format, ...) {
         }
     }
 
+    NSString *type = [useSocks boolValue] ? @"socks" : @"http";
+
     BOOL enabledBool = enabled ? [enabled boolValue] : YES;
     BOOL shouldEnable = enabledBool && (server.length > 0) && (port != nil);
-    [self updateProxy:shouldEnable server:server port:port];
+    [self updateProxy:shouldEnable server:server port:port type:type];
 }
 
-- (void)updateProxy:(BOOL)enabled server:(NSString *)server port:(NSNumber *)port {
+- (void)updateProxy:(BOOL)enabled server:(NSString *)server port:(NSNumber *)port type:(NSString *)type {
     PSLog(@"[proxyswitcherngd] applyFromPreferences: enabled=%d server=%@ port=%@", enabled, server ?: @"(nil)", port ?: @"(nil)");
 
     SCPreferencesRef prefs = SCPreferencesCreate(NULL, CFSTR("proxyswitcherngd"), NULL);
@@ -206,16 +210,34 @@ static void PSFileLog(NSString *format, ...) {
 
     BOOL shouldWrite = NO;
     if (enabled) {
-        if (![self shouldChangeProxyDict:proxies withServer:server port:port]) {
+        if (![self shouldChangeProxyDict:proxies withServer:server port:port type:type]) {
             PSLog(@"[proxyswitcherngd] proxy state already matches desired state; skipping write");
         } else {
-            PSLog(@"[proxyswitcherngd] setting proxy server=%@ port=%@", server, port);
-            proxies[cfs2nss(kSCPropNetProxiesHTTPEnable)] = @(1);
-            proxies[cfs2nss(kSCPropNetProxiesHTTPProxy)] = server;
-            proxies[cfs2nss(kSCPropNetProxiesHTTPPort)] = port;
-            proxies[cfs2nss(kSCPropNetProxiesHTTPSEnable)] = @(1);
-            proxies[cfs2nss(kSCPropNetProxiesHTTPSProxy)] = server;
-            proxies[cfs2nss(kSCPropNetProxiesHTTPSPort)] = port;
+            PSLog(@"[proxyswitcherngd] setting %@ proxy server=%@ port=%@", type, server, port);
+            if ([type isEqualToString:@"socks"]) {
+                // SOCKS mode: set SOCKS keys, remove any HTTP/HTTPS keys so the
+                // two modes never coexist on the service.
+                proxies[cfs2nss(kSCPropNetProxiesSOCKSEnable)] = @(1);
+                proxies[cfs2nss(kSCPropNetProxiesSOCKSProxy)] = server;
+                proxies[cfs2nss(kSCPropNetProxiesSOCKSPort)] = port;
+                [proxies removeObjectForKey:cfs2nss(kSCPropNetProxiesHTTPEnable)];
+                [proxies removeObjectForKey:cfs2nss(kSCPropNetProxiesHTTPProxy)];
+                [proxies removeObjectForKey:cfs2nss(kSCPropNetProxiesHTTPPort)];
+                [proxies removeObjectForKey:cfs2nss(kSCPropNetProxiesHTTPSEnable)];
+                [proxies removeObjectForKey:cfs2nss(kSCPropNetProxiesHTTPSProxy)];
+                [proxies removeObjectForKey:cfs2nss(kSCPropNetProxiesHTTPSPort)];
+            } else {
+                // HTTP mode: set HTTP + HTTPS keys, remove any SOCKS keys.
+                proxies[cfs2nss(kSCPropNetProxiesHTTPEnable)] = @(1);
+                proxies[cfs2nss(kSCPropNetProxiesHTTPProxy)] = server;
+                proxies[cfs2nss(kSCPropNetProxiesHTTPPort)] = port;
+                proxies[cfs2nss(kSCPropNetProxiesHTTPSEnable)] = @(1);
+                proxies[cfs2nss(kSCPropNetProxiesHTTPSProxy)] = server;
+                proxies[cfs2nss(kSCPropNetProxiesHTTPSPort)] = port;
+                [proxies removeObjectForKey:cfs2nss(kSCPropNetProxiesSOCKSEnable)];
+                [proxies removeObjectForKey:cfs2nss(kSCPropNetProxiesSOCKSProxy)];
+                [proxies removeObjectForKey:cfs2nss(kSCPropNetProxiesSOCKSPort)];
+            }
             shouldWrite = YES;
         }
     } else {
@@ -378,15 +400,26 @@ static void PSFileLog(NSString *format, ...) {
     return [value isKindOfClass:[NSString class]] && [(NSString *)value isEqualToString:expected];
 }
 
-- (BOOL)shouldChangeProxyDict:(NSDictionary *)proxyDict withServer:(NSString *)server port:(NSNumber *)port {
-    return !(
+- (BOOL)shouldChangeProxyDict:(NSDictionary *)proxyDict withServer:(NSString *)server port:(NSNumber *)port type:(NSString *)type {
+    if ([type isEqualToString:@"socks"]) {
+        BOOL socksMatches =
+            [self value:proxyDict[cfs2nss(kSCPropNetProxiesSOCKSEnable)] isNumber:@1]     &&
+            [self value:proxyDict[cfs2nss(kSCPropNetProxiesSOCKSProxy)]  isString:server] &&
+            [self value:proxyDict[cfs2nss(kSCPropNetProxiesSOCKSPort)]   isNumber:port];
+        BOOL httpAbsent =
+            proxyDict[cfs2nss(kSCPropNetProxiesHTTPProxy)] == nil &&
+            proxyDict[cfs2nss(kSCPropNetProxiesHTTPSProxy)] == nil;
+        return !(socksMatches && httpAbsent);
+    }
+    BOOL httpMatches =
         [self value:proxyDict[cfs2nss(kSCPropNetProxiesHTTPEnable)]  isNumber:@1]     &&
         [self value:proxyDict[cfs2nss(kSCPropNetProxiesHTTPProxy)]   isString:server] &&
         [self value:proxyDict[cfs2nss(kSCPropNetProxiesHTTPPort)]    isNumber:port]   &&
         [self value:proxyDict[cfs2nss(kSCPropNetProxiesHTTPSEnable)] isNumber:@1]     &&
         [self value:proxyDict[cfs2nss(kSCPropNetProxiesHTTPSProxy)]  isString:server] &&
-        [self value:proxyDict[cfs2nss(kSCPropNetProxiesHTTPSPort)]   isNumber:port]
-    );
+        [self value:proxyDict[cfs2nss(kSCPropNetProxiesHTTPSPort)]   isNumber:port];
+    BOOL socksAbsent = proxyDict[cfs2nss(kSCPropNetProxiesSOCKSProxy)] == nil;
+    return !(httpMatches && socksAbsent);
 }
 
 @end

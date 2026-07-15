@@ -13,6 +13,7 @@
 #import <unistd.h>
 #import <errno.h>
 #import <string.h>
+#import <stdint.h>
 
 static NSString * const kPrefsDomain = @"io.ymuu.proxyswitcherng";
 static NSString * const kSettingsChangedNotification = @"io.ymuu.proxyswitcherng/settingschanged";
@@ -32,19 +33,42 @@ static void PSApplyButtonStateChanged(CFNotificationCenterRef center, void *obse
 	});
 }
 
-typedef NS_ENUM(NSInteger, PSProbeResult) {
-	PSProbeConnected = 0,
-	PSProbeRefused,
-	PSProbeTimeout,
-	PSProbeDNSFail,
-};
+// End-to-end reachability target: the Apply test verifies the proxy can actually
+// forward to this host, not just that the proxy port is open.
+static NSString * const kProbeTargetHost = @"ymuu.me";
+static const int kProbeTargetPort = 443;
 
-// Raw TCP connect to host:port with a timeout. This actually exercises the
-// proxy endpoint (does something accept a connection there?), which is the real
-// question item 3 asks. An earlier NSURLSession probe against an https URL gave
-// false positives: when the proxy was down, the session silently fell back to a
-// direct connection to the test site and reported success.
-static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeout) {
+// Write every byte; NO on error.
+static BOOL PSWriteAll(int fd, const void *buf, size_t len) {
+	const uint8_t *p = (const uint8_t *)buf;
+	size_t off = 0;
+	while (off < len) {
+		ssize_t n = write(fd, p + off, len - off);
+		if (n > 0) { off += (size_t)n; continue; }
+		if (n < 0 && errno == EINTR) { continue; }
+		return NO;
+	}
+	return YES;
+}
+
+// Read up to len bytes, stopping on EOF/timeout; returns bytes actually read.
+static ssize_t PSReadSome(int fd, void *buf, size_t len) {
+	uint8_t *p = (uint8_t *)buf;
+	size_t off = 0;
+	while (off < len) {
+		ssize_t n = read(fd, p + off, len - off);
+		if (n > 0) { off += (size_t)n; continue; }
+		if (n == 0) { break; }
+		if (errno == EINTR) { continue; }
+		break; // EAGAIN (SO_RCVTIMEO) or other: return what we have
+	}
+	return (ssize_t)off;
+}
+
+// TCP connect to host:port with a timeout, then switch the socket to blocking
+// with SO_RCVTIMEO/SO_SNDTIMEO for the proxy handshake. Returns fd (>=0) or -1,
+// setting *detail to a specific reason (DNS, refused, timeout).
+static int PSConnectWithTimeout(NSString *host, int port, NSTimeInterval timeout, NSString **detail) {
 	struct addrinfo hints;
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;
@@ -54,11 +78,14 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 	snprintf(portStr, sizeof(portStr), "%d", port);
 
 	struct addrinfo *res = NULL;
-	if (getaddrinfo(host.UTF8String, portStr, &hints, &res) != 0 || res == NULL) {
-		return PSProbeDNSFail;
+	int gai = getaddrinfo(host.UTF8String, portStr, &hints, &res);
+	if (gai != 0 || res == NULL) {
+		if (detail) { *detail = [NSString stringWithFormat:@"cannot resolve %@ (%s)", host, gai_strerror(gai)]; }
+		return -1;
 	}
 
-	PSProbeResult result = PSProbeRefused;
+	int outFd = -1;
+	NSString *lastErr = nil;
 	for (struct addrinfo *ai = res; ai != NULL; ai = ai->ai_next) {
 		int fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
 		if (fd < 0) { continue; }
@@ -67,51 +94,141 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 		fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
 		int rc = connect(fd, ai->ai_addr, ai->ai_addrlen);
-		if (rc == 0) {
-			close(fd);
-			result = PSProbeConnected;
-			break;
-		}
-		if (errno != EINPROGRESS) {
-			close(fd);
-			result = PSProbeRefused;
-			continue;
-		}
-
-		fd_set wset;
-		FD_ZERO(&wset);
-		FD_SET(fd, &wset);
-		struct timeval tv;
-		tv.tv_sec = (long)timeout;
-		tv.tv_usec = (long)((timeout - (long)timeout) * 1000000);
-
-		int sel = select(fd + 1, NULL, &wset, NULL, &tv);
-		if (sel == 0) {
-			close(fd);
-			result = PSProbeTimeout;
-			continue;
-		}
-		if (sel < 0) {
-			close(fd);
-			result = PSProbeRefused;
-			continue;
+		if (rc != 0 && errno == EINPROGRESS) {
+			fd_set wset;
+			FD_ZERO(&wset);
+			FD_SET(fd, &wset);
+			struct timeval tv;
+			tv.tv_sec = (long)timeout;
+			tv.tv_usec = (long)((timeout - (long)timeout) * 1000000);
+			int sel = select(fd + 1, NULL, &wset, NULL, &tv);
+			if (sel == 0) {
+				lastErr = [NSString stringWithFormat:@"connect to %@:%d timed out after %.0fs", host, port, timeout];
+				close(fd); continue;
+			}
+			if (sel < 0) {
+				lastErr = [NSString stringWithFormat:@"select on %@:%d: %s", host, port, strerror(errno)];
+				close(fd); continue;
+			}
+			int soErr = 0;
+			socklen_t l = sizeof(soErr);
+			if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soErr, &l) < 0 || soErr != 0) {
+				lastErr = [NSString stringWithFormat:@"connect to %@:%d: %s", host, port, strerror(soErr ? soErr : errno)];
+				close(fd); continue;
+			}
+		} else if (rc != 0) {
+			lastErr = [NSString stringWithFormat:@"connect to %@:%d: %s", host, port, strerror(errno)];
+			close(fd); continue;
 		}
 
-		int soErr = 0;
-		socklen_t len = sizeof(soErr);
-		if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soErr, &len) < 0 || soErr != 0) {
-			close(fd);
-			result = PSProbeRefused;
-			continue;
-		}
-
-		close(fd);
-		result = PSProbeConnected;
+		fcntl(fd, F_SETFL, flags & ~O_NONBLOCK);
+		struct timeval io;
+		io.tv_sec = (long)timeout;
+		io.tv_usec = 0;
+		setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &io, sizeof(io));
+		setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &io, sizeof(io));
+		outFd = fd;
 		break;
 	}
 
 	freeaddrinfo(res);
-	return result;
+	if (outFd < 0 && detail) { *detail = lastErr ?: @"connection failed"; }
+	return outFd;
+}
+
+// SOCKS5 no-auth handshake + CONNECT to the target on an already-connected fd.
+// Returns YES on a 0x00 reply; *detail always gets a specific reason.
+static BOOL PSProbeSocks5(int fd, NSString **detail) {
+	uint8_t greet[3] = {0x05, 0x01, 0x00};
+	if (!PSWriteAll(fd, greet, sizeof(greet))) {
+		if (detail) { *detail = [NSString stringWithFormat:@"SOCKS5 greeting write failed: %s", strerror(errno)]; }
+		return NO;
+	}
+	uint8_t methodResp[2] = {0, 0};
+	if (PSReadSome(fd, methodResp, 2) < 2) {
+		if (detail) { *detail = @"SOCKS5: no method reply (timeout?)"; }
+		return NO;
+	}
+	if (methodResp[0] != 0x05 || methodResp[1] != 0x00) {
+		if (detail) {
+			*detail = [NSString stringWithFormat:@"SOCKS5 handshake rejected (ver=0x%02x, method=0x%02x)%@",
+				methodResp[0], methodResp[1], methodResp[1] == 0xFF ? @", server requires auth" : @""];
+		}
+		return NO;
+	}
+
+	const char *th = kProbeTargetHost.UTF8String;
+	size_t thl = strlen(th);
+	uint8_t req[262];
+	size_t i = 0;
+	req[i++] = 0x05; req[i++] = 0x01; req[i++] = 0x00; req[i++] = 0x03;
+	req[i++] = (uint8_t)thl;
+	memcpy(req + i, th, thl); i += thl;
+	req[i++] = (uint8_t)((kProbeTargetPort >> 8) & 0xFF);
+	req[i++] = (uint8_t)(kProbeTargetPort & 0xFF);
+	if (!PSWriteAll(fd, req, i)) {
+		if (detail) { *detail = [NSString stringWithFormat:@"SOCKS5 CONNECT write failed: %s", strerror(errno)]; }
+		return NO;
+	}
+
+	uint8_t rep[10] = {0};
+	if (PSReadSome(fd, rep, sizeof(rep)) < 2) {
+		if (detail) { *detail = @"SOCKS5: no CONNECT reply (timeout?)"; }
+		return NO;
+	}
+	uint8_t code = rep[1];
+	if (code == 0x00) {
+		if (detail) { *detail = [NSString stringWithFormat:@"SOCKS5 CONNECT %@:%d OK", kProbeTargetHost, kProbeTargetPort]; }
+		return YES;
+	}
+	static const char *socksErrs[] = {"success", "general SOCKS server failure", "connection not allowed",
+		"network unreachable", "host unreachable", "connection refused", "TTL expired",
+		"command not supported", "address type not supported"};
+	NSString *m = (code <= 8) ? [NSString stringWithUTF8String:socksErrs[code]] : @"unknown";
+	if (detail) { *detail = [NSString stringWithFormat:@"SOCKS5 CONNECT failed: %@ (0x%02x)", m, code]; }
+	return NO;
+}
+
+// HTTP CONNECT to the target on an already-connected fd. Returns YES on 200;
+// *detail always gets the status line or a specific reason.
+static BOOL PSProbeHttpConnect(int fd, NSString **detail) {
+	NSString *reqStr = [NSString stringWithFormat:@"CONNECT %@:%d HTTP/1.1\r\nHost: %@:%d\r\n\r\n",
+		kProbeTargetHost, kProbeTargetPort, kProbeTargetHost, kProbeTargetPort];
+	const char *req = reqStr.UTF8String;
+	if (!PSWriteAll(fd, req, strlen(req))) {
+		if (detail) { *detail = [NSString stringWithFormat:@"HTTP CONNECT write failed: %s", strerror(errno)]; }
+		return NO;
+	}
+
+	char buf[256];
+	memset(buf, 0, sizeof(buf));
+	if (PSReadSome(fd, buf, sizeof(buf) - 1) <= 0) {
+		if (detail) { *detail = @"HTTP proxy: no response (timeout?)"; }
+		return NO;
+	}
+
+	NSString *resp = [NSString stringWithUTF8String:buf] ?: @"";
+	NSString *statusLine = [[resp componentsSeparatedByString:@"\r\n"] firstObject] ?: resp;
+	NSArray *parts = [statusLine componentsSeparatedByString:@" "];
+	NSInteger code = (parts.count >= 2) ? [parts[1] integerValue] : 0;
+	if (code == 200) {
+		if (detail) { *detail = [NSString stringWithFormat:@"HTTP CONNECT %@:%d -> %@", kProbeTargetHost, kProbeTargetPort, statusLine]; }
+		return YES;
+	}
+	if (detail) { *detail = [NSString stringWithFormat:@"HTTP CONNECT failed: %@", statusLine.length ? statusLine : resp]; }
+	return NO;
+}
+
+// Verify the proxy actually forwards by reaching kProbeTargetHost through it.
+// Speaks the proxy protocol on a raw socket (HTTP CONNECT or SOCKS5), so there is
+// no NSURLSession direct-fallback false positive. *detail always gets a specific
+// reason, success or failure.
+static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSocks, NSTimeInterval timeout, NSString **detail) {
+	int fd = PSConnectWithTimeout(proxyHost, proxyPort, timeout, detail);
+	if (fd < 0) { return NO; }
+	BOOL ok = useSocks ? PSProbeSocks5(fd, detail) : PSProbeHttpConnect(fd, detail);
+	close(fd);
+	return ok;
 }
 
 @interface PSNRootListController ()
@@ -154,6 +271,12 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 + (void)setActiveProxy:(NSString *)activeProxy {
 	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
 	CFPreferencesSetValue(CFSTR("activeProxy"), (__bridge CFPropertyListRef)(activeProxy ?: @""), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+}
+
++ (void)setUseSocks:(BOOL)useSocks {
+	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFPreferencesSetValue(CFSTR("useSocks"), (__bridge CFPropertyListRef)(@(useSocks)), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 }
 
@@ -308,14 +431,17 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 		NSDictionary *profile = profiles[i];
 		NSString *name = @"";
 		NSString *value = @"";
+		NSString *type = @"http";
 		if ([profile isKindOfClass:[NSDictionary class]]) {
 			name = profile[@"name"] ?: @"";
 			value = profile[@"value"] ?: @"";
+			if ([profile[@"type"] isEqualToString:@"socks"]) { type = @"socks"; }
 		}
 		if (name.length == 0) { name = value; }
 		if (name.length == 0) { name = @"(untitled)"; }
 
-		NSString *title = [NSString stringWithFormat:@"%@ (%@)", name, value];
+		NSString *typeLabel = [type isEqualToString:@"socks"] ? @"SOCKS" : @"HTTP";
+		NSString *title = [NSString stringWithFormat:@"%@ (%@) - %@", name, value, typeLabel];
 		PSSpecifier *specifier = [PSSpecifier preferenceSpecifierNamed:title
 															  target:self
 																set:NULL
@@ -328,6 +454,7 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 		[specifier setProperty:@(NO) forKey:kManualKey];
 		[specifier setProperty:value forKey:kProfileValueKey];
 		[specifier setProperty:@(i) forKey:kProfileIndexKey];
+		[specifier setProperty:type forKey:@"psnProfileType"];
 		[specifiers addObject:specifier];
 	}
 
@@ -347,6 +474,13 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 - (void)selectProfile:(PSSpecifier *)specifier {
 	NSString *value = [specifier propertyForKey:kProfileValueKey] ?: @"";
 	[PSNRootListController setActiveProxy:value];
+	// Manual row (kManualKey) keeps whatever the manual Type cell set; only a
+	// real saved profile carries its own type.
+	BOOL isManual = [[specifier propertyForKey:kManualKey] boolValue];
+	if (!isManual) {
+		NSString *type = [specifier propertyForKey:@"psnProfileType"] ?: @"http";
+		[PSNRootListController setUseSocks:[type isEqualToString:@"socks"]];
+	}
 	[PSNRootListController postSettingsChanged];
 	[self reloadSpecifiers];
 }
@@ -430,26 +564,20 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 	NSString *hostCopy = testHost;
 	int portInt = testPort.intValue;
 
+	CFStringRef appIDc = (__bridge CFStringRef)kPrefsDomain;
+	CFPreferencesSynchronize(appIDc, CFSTR("mobile"), kCFPreferencesAnyHost);
+	NSNumber *useSocksNum = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("useSocks"), appIDc, CFSTR("mobile"), kCFPreferencesAnyHost);
+	BOOL useSocks = [useSocksNum boolValue];
+
 	dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-		PSProbeResult probe = PSProbeProxy(hostCopy, portInt, 8.0);
+		NSString *detail = nil;
+		BOOL ok = PSProbeThroughProxy(hostCopy, portInt, useSocks, 8.0, &detail);
 		dispatch_async(dispatch_get_main_queue(), ^{
-			NSString *message = nil;
-			switch (probe) {
-				case PSProbeConnected:
-					message = [NSString stringWithFormat:@"Connected to %@", displayHostPort];
-					break;
-				case PSProbeRefused:
-					message = [NSString stringWithFormat:@"%@ refused the connection. Is the proxy running?", displayHostPort];
-					break;
-				case PSProbeTimeout:
-					message = [NSString stringWithFormat:@"%@ timed out. Not reachable on this network.", displayHostPort];
-					break;
-				case PSProbeDNSFail:
-				default:
-					message = [NSString stringWithFormat:@"Could not resolve %@", hostCopy];
-					break;
-			}
-			UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Apply" message:message preferredStyle:UIAlertControllerStyleAlert];
+			NSString *typeStr = useSocks ? @"SOCKS5" : @"HTTP";
+			NSString *message = ok
+				? [NSString stringWithFormat:@"%@ proxy %@ reached %@:%d.\n\n%@", typeStr, displayHostPort, kProbeTargetHost, kProbeTargetPort, detail ?: @""]
+				: [NSString stringWithFormat:@"%@ proxy %@ could not reach %@:%d.\n\n%@", typeStr, displayHostPort, kProbeTargetHost, kProbeTargetPort, detail ?: @"unknown error"];
+			UIAlertController *alert = [UIAlertController alertControllerWithTitle:(ok ? @"Apply: OK" : @"Apply: Failed") message:message preferredStyle:UIAlertControllerStyleAlert];
 			[alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
 			[self presentViewController:alert animated:YES completion:nil];
 		});

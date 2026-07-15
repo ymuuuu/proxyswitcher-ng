@@ -6,11 +6,13 @@
 static NSString * const kProfileEditNameKey = @"name";
 static NSString * const kProfileEditHostKey = @"host";
 static NSString * const kProfileEditPortKey = @"port";
+static NSString * const kProfileEditTypeKey = @"type";
 
 @interface PSNProfileEditController ()
 @property (nonatomic, copy) NSString *nameValue;
 @property (nonatomic, copy) NSString *hostValue;
 @property (nonatomic, copy) NSString *portValue;
+@property (nonatomic, copy) NSString *typeValue;
 @end
 
 @implementation PSNProfileEditController
@@ -20,6 +22,7 @@ static NSString * const kProfileEditPortKey = @"port";
 		NSString *name = @"";
 		NSString *host = @"";
 		NSString *port = @"";
+		NSString *type = @"http";
 
 		if ([self.profile isKindOfClass:[NSDictionary class]]) {
 			name = self.profile[@"name"] ?: @"";
@@ -29,11 +32,13 @@ static NSString * const kProfileEditPortKey = @"port";
 				host = [[value substringToIndex:colon.location] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 				port = [[value substringFromIndex:colon.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 			}
+			if ([self.profile[@"type"] isEqualToString:@"socks"]) { type = @"socks"; }
 		}
 
 		self.nameValue = name;
 		self.hostValue = host;
 		self.portValue = port;
+		self.typeValue = type;
 
 		PSSpecifier *group = [PSSpecifier groupSpecifierWithName:@"Edit Profile"];
 
@@ -70,7 +75,22 @@ static NSString * const kProfileEditPortKey = @"port";
 		[portSpec setProperty:@(YES) forKey:PSNumberKeyboardKey];
 		[portSpec setProperty:@"NumberPad" forKey:PSKeyboardTypeKey];
 
-		_specifiers = [NSMutableArray arrayWithObjects:group, nameSpec, hostSpec, portSpec, nil];
+		// Plain switch: on = SOCKS, off = HTTP/HTTPS. Both PSLinkListCell (drills
+		// into a PSListItemsController that aborts on a hand-built specifier) and
+		// PSSegmentCell (renders blank) fail in this Preferences build; a
+		// PSSwitchCell is the same cell the Enabled/logging rows use and renders
+		// reliably. The get/set map the switch bool to the "http"/"socks" string.
+		PSSpecifier *typeSpec = [PSSpecifier preferenceSpecifierNamed:@"Use SOCKS proxy"
+																target:self
+																set:@selector(setPreferenceValue:specifier:)
+																get:@selector(readPreferenceValue:)
+																detail:NULL
+																cell:PSSwitchCell
+																edit:NULL];
+		[typeSpec setProperty:kProfileEditTypeKey forKey:PSKeyNameKey];
+		[typeSpec setProperty:@([self.typeValue isEqualToString:@"socks"]) forKey:PSDefaultValueKey];
+
+		_specifiers = [NSMutableArray arrayWithObjects:group, nameSpec, hostSpec, portSpec, typeSpec, nil];
 	}
 
 	return _specifiers;
@@ -81,6 +101,7 @@ static NSString * const kProfileEditPortKey = @"port";
 	if ([key isEqualToString:kProfileEditNameKey]) { return self.nameValue ?: @""; }
 	if ([key isEqualToString:kProfileEditHostKey]) { return self.hostValue ?: @""; }
 	if ([key isEqualToString:kProfileEditPortKey]) { return self.portValue ?: @""; }
+	if ([key isEqualToString:kProfileEditTypeKey]) { return @([self.typeValue isEqualToString:@"socks"]); }
 	return nil;
 }
 
@@ -99,6 +120,8 @@ static NSString * const kProfileEditPortKey = @"port";
 		self.hostValue = string;
 	} else if ([key isEqualToString:kProfileEditPortKey]) {
 		self.portValue = string;
+	} else if ([key isEqualToString:kProfileEditTypeKey]) {
+		self.typeValue = [value boolValue] ? @"socks" : @"http";
 	}
 }
 
@@ -132,7 +155,8 @@ static NSString * const kProfileEditPortKey = @"port";
 		name = host;
 	}
 	NSString *value = [NSString stringWithFormat:@"%@:%d", host, port];
-	NSDictionary *profile = @{@"name": name, @"value": value};
+	NSString *type = [self.typeValue isEqualToString:@"socks"] ? @"socks" : @"http";
+	NSDictionary *profile = @{@"name": name, @"value": value, @"type": type};
 
 	[PSNRootListController addOrUpdateProfile:profile atIndex:self.profileIndex];
 

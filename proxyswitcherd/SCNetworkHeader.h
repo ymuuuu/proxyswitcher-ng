@@ -15,6 +15,8 @@ extern const CFStringRef kSCPropNetProxiesHTTPSEnable;
 extern const CFStringRef kSCPropNetProxiesHTTPSProxy;
 extern const CFStringRef kSCPropNetProxiesHTTPSPort;
 extern const CFStringRef kSCPropNetProxiesSOCKSEnable;
+extern const CFStringRef kSCPropNetProxiesSOCKSProxy;
+extern const CFStringRef kSCPropNetProxiesSOCKSPort;
 extern const CFStringRef kSCPropNetProxiesProxyAutoConfigEnable;
 extern const CFStringRef kSCPrefSets;
 extern const CFStringRef kSCPropUserDefinedName;

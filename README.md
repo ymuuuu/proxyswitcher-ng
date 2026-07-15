@@ -22,12 +22,19 @@ every time. Set your proxies once, then flip between them.
 ## What it does
 
 - **One switch.** Turn the Wi-Fi HTTP/HTTPS proxy on or off from a single toggle.
+- **HTTP or SOCKS.** Each proxy can be HTTP/HTTPS or SOCKS5, chosen per profile
+  with a simple switch. Point your phone at a SOCKS tunnel (`ssh -D`, mitmproxy
+  `--mode socks5`, and the like) or a regular HTTP intercept proxy.
 - **Saved profiles.** Keep a list of proxies (`host:port`) and tap to make one
-  active. Add, edit, and delete them right in Settings, no SSH needed.
+  active. Add, edit, and delete them right in Settings, no SSH needed. Edit an
+  existing profile to flip it between HTTP and SOCKS without recreating it.
 - **Sticks around.** A small root daemon re-applies your proxy when you switch
   Wi-Fi networks, so it does not fall off on you.
-- **Apply and check.** An Apply button re-pushes the setting and tells you whether
-  the phone can still reach the internet through it.
+- **Apply and check, for real.** The Apply button actually routes a request
+  through the proxy to a test host and reports back. It speaks the proxy's own
+  protocol (HTTP `CONNECT`, or the SOCKS5 handshake), so it cannot be fooled by
+  iOS silently falling back to a direct connection, and a failure shows the
+  specific reason (connection refused, timeout, SOCKS reply code, HTTP status).
 - **Logs when you want them.** Turn on logging to see exactly what the daemon did,
   readable from a Logs page inside the app.
 
@@ -70,6 +77,26 @@ and uploads the `.deb`. See `docs/CI-ARM64E-BUILD.md` for the details and the
 potholes.
 
 > Note: I am no developer by any means, but I build tools to help me with my workflow, so why not share? :'D
+
+## Changelog
+
+### Unreleased
+
+- **SOCKS5 support.** Each profile can now be HTTP/HTTPS or SOCKS5, chosen with a
+  per-profile switch, plus a switch for the manual entry. The daemon writes the
+  Wi-Fi service's SOCKS keys or HTTP/HTTPS keys accordingly and never leaves both
+  set at once.
+- **Real end-to-end Apply check.** Apply now reaches a test host through the proxy
+  using the proxy's own protocol (HTTP `CONNECT` / SOCKS5), instead of only
+  checking that the proxy port is open. Failures report the specific reason.
+- **Universal build.** The preference bundle now ships both arm64 and arm64e
+  slices, so it loads on A11 and older devices (iPhone 8 / X) as well as A12+.
+
+### Earlier
+
+- Saved proxy profiles (add, edit, delete, select) from Settings.
+- Single on/off toggle, logging console with a Logs page, per-build versioning,
+  Settings icon, signed Sileo repo.
 
 ## Credit
 
