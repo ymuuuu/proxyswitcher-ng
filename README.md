@@ -69,6 +69,8 @@ correct arm64e ABI needs Apple's toolchain. Push a branch and the workflow build
 and uploads the `.deb`. See `docs/CI-ARM64E-BUILD.md` for the details and the
 potholes.
 
+> Note: I am no developer by any means, but I build tools to help me with my workflow, so why not share? :'D
+
 ## Credit
 
 A modern rewrite of [mikaelbo/ProxySwitcher](https://github.com/mikaelbo/ProxySwitcher),
