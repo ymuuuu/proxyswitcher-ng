@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/demo.gif" width="900" alt="ProxySwitcher-ng demo" />
+  <img src="./demo.gif" width="900" alt="ProxySwitcher-ng demo" />
 </p>
 
 ---
