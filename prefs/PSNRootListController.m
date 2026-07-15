@@ -157,6 +157,13 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 }
 
++ (void)setProxyType:(NSString *)type {
+	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	NSString *value = [type isEqualToString:@"socks"] ? @"socks" : @"http";
+	CFPreferencesSetValue(CFSTR("proxyType"), (__bridge CFPropertyListRef)(value), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+}
+
 + (BOOL)isEnabled {
 	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
@@ -308,14 +315,17 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 		NSDictionary *profile = profiles[i];
 		NSString *name = @"";
 		NSString *value = @"";
+		NSString *type = @"http";
 		if ([profile isKindOfClass:[NSDictionary class]]) {
 			name = profile[@"name"] ?: @"";
 			value = profile[@"value"] ?: @"";
+			if ([profile[@"type"] isEqualToString:@"socks"]) { type = @"socks"; }
 		}
 		if (name.length == 0) { name = value; }
 		if (name.length == 0) { name = @"(untitled)"; }
 
-		NSString *title = [NSString stringWithFormat:@"%@ (%@)", name, value];
+		NSString *typeLabel = [type isEqualToString:@"socks"] ? @"SOCKS" : @"HTTP";
+		NSString *title = [NSString stringWithFormat:@"%@ (%@) - %@", name, value, typeLabel];
 		PSSpecifier *specifier = [PSSpecifier preferenceSpecifierNamed:title
 															  target:self
 																set:NULL
@@ -328,6 +338,7 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 		[specifier setProperty:@(NO) forKey:kManualKey];
 		[specifier setProperty:value forKey:kProfileValueKey];
 		[specifier setProperty:@(i) forKey:kProfileIndexKey];
+		[specifier setProperty:type forKey:@"psnProfileType"];
 		[specifiers addObject:specifier];
 	}
 
@@ -347,6 +358,13 @@ static PSProbeResult PSProbeProxy(NSString *host, int port, NSTimeInterval timeo
 - (void)selectProfile:(PSSpecifier *)specifier {
 	NSString *value = [specifier propertyForKey:kProfileValueKey] ?: @"";
 	[PSNRootListController setActiveProxy:value];
+	// Manual row (kManualKey) keeps whatever the manual Type cell set; only a
+	// real saved profile carries its own type.
+	BOOL isManual = [[specifier propertyForKey:kManualKey] boolValue];
+	if (!isManual) {
+		NSString *type = [specifier propertyForKey:@"psnProfileType"] ?: @"http";
+		[PSNRootListController setProxyType:type];
+	}
 	[PSNRootListController postSettingsChanged];
 	[self reloadSpecifiers];
 }

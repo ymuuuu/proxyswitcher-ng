@@ -7,6 +7,7 @@
 
 + (NSString *)activeProxy;
 + (void)setActiveProxy:(NSString *)activeProxy;
++ (void)setProxyType:(NSString *)type;
 + (BOOL)isEnabled;
 + (void)postSettingsChanged;
 

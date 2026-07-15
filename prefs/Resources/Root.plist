@@ -42,6 +42,24 @@
 			<key>PostNotification</key><string>io.ymuu.proxyswitcherng/settingschanged</string>
 		</dict>
 		<dict>
+			<key>cell</key><string>PSLinkListCell</string>
+			<key>defaults</key><string>io.ymuu.proxyswitcherng</string>
+			<key>key</key><string>proxyType</string>
+			<key>label</key><string>Type</string>
+			<key>default</key><string>http</string>
+			<key>values</key>
+			<array>
+				<string>http</string>
+				<string>socks</string>
+			</array>
+			<key>titles</key>
+			<array>
+				<string>HTTP</string>
+				<string>SOCKS</string>
+			</array>
+			<key>PostNotification</key><string>io.ymuu.proxyswitcherng/settingschanged</string>
+		</dict>
+		<dict>
 			<key>cell</key><string>PSGroupCell</string>
 			<key>label</key><string>Diagnostics</string>
 		</dict>
