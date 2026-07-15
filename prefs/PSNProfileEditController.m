@@ -84,8 +84,8 @@ static NSString * const kProfileEditTypeKey = @"type";
 																edit:NULL];
 		[typeSpec setProperty:kProfileEditTypeKey forKey:PSKeyNameKey];
 		[typeSpec setProperty:self.typeValue forKey:PSDefaultValueKey];
-		[typeSpec setValues:@[@"http", @"socks"]
-					 titles:@[@"HTTP", @"SOCKS"]];
+		[typeSpec setProperty:@[@"http", @"socks"] forKey:@"values"];
+		[typeSpec setProperty:@[@"HTTP", @"SOCKS"] forKey:@"titles"];
 
 		_specifiers = [NSMutableArray arrayWithObjects:group, nameSpec, hostSpec, portSpec, typeSpec, nil];
 	}
