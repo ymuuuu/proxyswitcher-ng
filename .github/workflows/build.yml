@@ -57,6 +57,15 @@ jobs:
           echo "bundle bin: $BUNDLE_BIN"
           otool -hv "$BUNDLE_BIN" || true
           lipo -detailed_info "$BUNDLE_BIN" || true
+          # Regression gate for issue #1: the bundle must be fat with an arm64
+          # slice (A11 and older: iPhone 8/X) AND an arm64e slice carrying Apple's
+          # ptrauth ABI (caps USR00, cpusubtype 0x80000002) for A12+.
+          ARCHS="$(lipo -archs "$BUNDLE_BIN")"
+          echo "archs: $ARCHS"
+          case " $ARCHS " in *" arm64 "*) ;; *) echo "MISSING arm64 slice (A11 devices will fail to load)"; exit 1 ;; esac
+          case " $ARCHS " in *" arm64e "*) ;; *) echo "MISSING arm64e slice"; exit 1 ;; esac
+          otool -hv "$BUNDLE_BIN" | grep -q '0x80000002\|USR00' || { echo "arm64e slice lacks ptrauth ABI (caps USR00)"; exit 1; }
+          echo "OK: fat bundle with arm64 + arm64e (ptrauth) slices"
 
       - name: Upload deb
         uses: actions/upload-artifact@v4
