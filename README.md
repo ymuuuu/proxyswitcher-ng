@@ -9,6 +9,10 @@
   proxies you can switch between with one tap.
 </p>
 
+<p align="center">
+  <img src="docs/demo.gif" width="900" alt="ProxySwitcher-ng demo" />
+</p>
+
 ---
 
 Made for the times you want your phone's traffic going through Burp, mitmproxy,
