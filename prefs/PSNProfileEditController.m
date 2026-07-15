@@ -79,13 +79,15 @@ static NSString * const kProfileEditTypeKey = @"type";
 																target:self
 																set:@selector(setPreferenceValue:specifier:)
 																get:@selector(readPreferenceValue:)
-																detail:NULL
+																detail:NSClassFromString(@"PSListItemsController")
 																cell:PSLinkListCell
 																edit:NULL];
 		[typeSpec setProperty:kProfileEditTypeKey forKey:PSKeyNameKey];
 		[typeSpec setProperty:self.typeValue forKey:PSDefaultValueKey];
 		[typeSpec setProperty:@[@"http", @"socks"] forKey:@"values"];
 		[typeSpec setProperty:@[@"HTTP", @"SOCKS"] forKey:@"titles"];
+		[typeSpec setProperty:@[@"http", @"socks"] forKey:@"validValues"];
+		[typeSpec setProperty:@[@"HTTP", @"SOCKS"] forKey:@"validTitles"];
 
 		_specifiers = [NSMutableArray arrayWithObjects:group, nameSpec, hostSpec, portSpec, typeSpec, nil];
 	}
