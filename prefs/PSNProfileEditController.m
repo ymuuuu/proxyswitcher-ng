@@ -75,19 +75,25 @@ static NSString * const kProfileEditTypeKey = @"type";
 		[portSpec setProperty:@(YES) forKey:PSNumberKeyboardKey];
 		[portSpec setProperty:@"NumberPad" forKey:PSKeyboardTypeKey];
 
+		// PSLinkListCell drills into a PSListItemsController that renders its rows
+		// from the specifier's validValues plus its titleDictionary (the value to
+		// display-title map). The plist loader builds titleDictionary from the
+		// values/titles pair automatically; a hand-built specifier must set it, or
+		// the child list renders empty (blank page).
+		NSArray *typeValues = @[@"http", @"socks"];
+		NSDictionary *typeTitles = @{@"http": @"HTTP", @"socks": @"SOCKS"};
+
 		PSSpecifier *typeSpec = [PSSpecifier preferenceSpecifierNamed:@"Type"
 																target:self
 																set:@selector(setPreferenceValue:specifier:)
 																get:@selector(readPreferenceValue:)
-																detail:NSClassFromString(@"PSListItemsController")
+																detail:[PSListItemsController class]
 																cell:PSLinkListCell
 																edit:NULL];
 		[typeSpec setProperty:kProfileEditTypeKey forKey:PSKeyNameKey];
 		[typeSpec setProperty:self.typeValue forKey:PSDefaultValueKey];
-		[typeSpec setProperty:@[@"http", @"socks"] forKey:@"values"];
-		[typeSpec setProperty:@[@"HTTP", @"SOCKS"] forKey:@"titles"];
-		[typeSpec setProperty:@[@"http", @"socks"] forKey:@"validValues"];
-		[typeSpec setProperty:@[@"HTTP", @"SOCKS"] forKey:@"validTitles"];
+		[typeSpec setProperty:typeValues forKey:PSValidValuesKey];
+		typeSpec.titleDictionary = typeTitles;
 
 		_specifiers = [NSMutableArray arrayWithObjects:group, nameSpec, hostSpec, portSpec, typeSpec, nil];
 	}
