@@ -37,6 +37,13 @@ every time. Set your proxies once, then flip between them.
   specific reason (connection refused, timeout, SOCKS reply code, HTTP status).
 - **Logs when you want them.** Turn on logging to see exactly what the daemon did,
   readable from a Logs page inside the app.
+- **Authenticated proxies.** A profile can carry a username and password. Because
+  iOS ignores system-proxy credentials, the tweak runs a small loopback relay
+  inside the root daemon that performs the authenticated upstream handshake itself
+  (`Proxy-Authorization: Basic` for HTTP `CONNECT`, RFC 1929 user/pass for SOCKS5).
+  Credentials are stored in the daemon's keychain (`AfterFirstUnlock`), never in
+  cfprefs or logs. Plain-HTTP keep-alive is best-effort; HTTPS via `CONNECT` is
+  fully supported.
 
 ## Install
 
@@ -82,6 +89,9 @@ potholes.
 
 ### Unreleased
 
+- **Authenticated proxy support.** Profiles can carry a username and password; an
+  in-daemon loopback relay authenticates upstream with HTTP Basic or SOCKS5
+  user/pass, and credentials live in the keychain.
 - **SOCKS5 support.** Each profile can now be HTTP/HTTPS or SOCKS5, chosen with a
   per-profile switch, plus a switch for the manual entry. The daemon writes the
   Wi-Fi service's SOCKS keys or HTTP/HTTPS keys accordingly and never leaves both
