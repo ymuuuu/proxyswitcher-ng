@@ -1,5 +1,8 @@
 #import "PSNWiFiProxyHandler.h"
+#import "PSNProxyRelay.h"
+#import "PSNCredentialService.h"
 #import <string.h>
+#import "PSNProxyAuth.h"
 
 static BOOL PSExpect(NSString *input, BOOL wantOK, NSString *wantHost, int wantPort) {
     NSString *host = nil; NSNumber *port = nil;
@@ -28,6 +31,34 @@ static int PSRunSelfTest(void) {
     fails += !PSExpect(@"host:70000",          NO,  nil, 0);               // out of range
     fails += !PSExpect(@"host:0",              NO,  nil, 0);               // out of range
     fails += !PSExpect(@"host:12ab",           NO,  nil, 0);               // non-digit
+    {
+        // Basic auth: base64("aladdin:opensesame") == "YWxhZGRpbjpvcGVuc2VzYW1l"
+        NSString *line = PSNBasicAuthHeaderLine(@"aladdin", @"opensesame");
+        BOOL ok = [line isEqualToString:@"Proxy-Authorization: Basic YWxhZGRpbjpvcGVuc2VzYW1l\r\n"];
+        fprintf(stderr, "[selftest] %s basic-auth header\n", ok ? "PASS" : "FAIL");
+        fails += !ok;
+    }
+    {
+        NSString *empty = PSNBasicAuthHeaderLine(@"", @"x");
+        BOOL ok = (empty.length == 0);
+        fprintf(stderr, "[selftest] %s basic-auth empty-user\n", ok ? "PASS" : "FAIL");
+        fails += !ok;
+    }
+    {
+        // RFC1929 frame for user "u" pass "p": 01 01 75 01 70
+        NSData *req = PSNSocks5UserPassRequest(@"u", @"p");
+        const uint8_t want[] = {0x01, 0x01, 0x75, 0x01, 0x70};
+        BOOL ok = (req.length == 5 && memcmp(req.bytes, want, 5) == 0);
+        fprintf(stderr, "[selftest] %s rfc1929 request frame\n", ok ? "PASS" : "FAIL");
+        fails += !ok;
+    }
+    {
+        const uint8_t good[] = {0x01, 0x00};
+        const uint8_t bad[]  = {0x01, 0x01};
+        BOOL ok = PSNSocks5UserPassReplyOK(good, 2) && !PSNSocks5UserPassReplyOK(bad, 2);
+        fprintf(stderr, "[selftest] %s rfc1929 reply parse\n", ok ? "PASS" : "FAIL");
+        fails += !ok;
+    }
     fprintf(stderr, "[selftest] %s (%d failures)\n", fails ? "OVERALL FAIL" : "OVERALL PASS", fails);
     return fails ? 1 : 0;
 }
@@ -49,6 +80,7 @@ static void settingsChanged(CFNotificationCenterRef center,
                             const void *object,
                             CFDictionaryRef userInfo) {
     NSLog(@"[proxyswitcherngd] received notification: io.ymuu.proxyswitcherng/settingschanged");
+    [PSNCredentialService drainPendingFromPrefs];
     [[PSNWiFiProxyHandler sharedInstance] applyFromPreferences];
 }
 
@@ -85,6 +117,9 @@ int main(int argc, char **argv, char **envp) {
                                     CFSTR("io.ymuu.proxyswitcherng/clearlog"),
                                     NULL,
                                     CFNotificationSuspensionBehaviorCoalesce);
+
+    [[PSNProxyRelay sharedInstance] startIfNeeded];
+    [PSNCredentialService start];
 
     [[PSNWiFiProxyHandler sharedInstance] applyFromPreferences];
 

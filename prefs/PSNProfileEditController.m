@@ -1,5 +1,6 @@
 #import "PSNProfileEditController.h"
 #import "PSNRootListController.h"
+#import "PSNCredentialClient.h"
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
 
@@ -7,12 +8,16 @@ static NSString * const kProfileEditNameKey = @"name";
 static NSString * const kProfileEditHostKey = @"host";
 static NSString * const kProfileEditPortKey = @"port";
 static NSString * const kProfileEditTypeKey = @"type";
+static NSString * const kProfileEditUserKey = @"username";
+static NSString * const kProfileEditPassKey = @"password";
 
 @interface PSNProfileEditController ()
 @property (nonatomic, copy) NSString *nameValue;
 @property (nonatomic, copy) NSString *hostValue;
 @property (nonatomic, copy) NSString *portValue;
 @property (nonatomic, copy) NSString *typeValue;
+@property (nonatomic, copy) NSString *userValue;
+@property (nonatomic, copy) NSString *passValue;
 @end
 
 @implementation PSNProfileEditController
@@ -39,6 +44,17 @@ static NSString * const kProfileEditTypeKey = @"type";
 		self.hostValue = host;
 		self.portValue = port;
 		self.typeValue = type;
+		self.userValue = @"";
+		self.passValue = @"";
+		// Prefill username from the daemon for an existing profile with auth.
+		if ([self.profile[@"hasAuth"] boolValue]) {
+			NSString *u = nil, *p = nil;
+			BOOL socks = [self.typeValue isEqualToString:@"socks"];
+			if ([PSNCredentialClient getHost:self.hostValue port:[self.portValue intValue]
+									   socks:socks username:&u password:&p]) {
+				self.userValue = u ?: @""; self.passValue = p ?: @"";
+			}
+		}
 
 		PSSpecifier *group = [PSSpecifier groupSpecifierWithName:@"Edit Profile"];
 
@@ -90,7 +106,23 @@ static NSString * const kProfileEditTypeKey = @"type";
 		[typeSpec setProperty:kProfileEditTypeKey forKey:PSKeyNameKey];
 		[typeSpec setProperty:@([self.typeValue isEqualToString:@"socks"]) forKey:PSDefaultValueKey];
 
-		_specifiers = [NSMutableArray arrayWithObjects:group, nameSpec, hostSpec, portSpec, typeSpec, nil];
+		PSSpecifier *authGroup = [PSSpecifier groupSpecifierWithName:@"Authentication (optional)"];
+		[authGroup setProperty:@"Leave blank for no proxy auth. Password is stored in the keychain, never in prefs." forKey:PSFooterTextGroupKey];
+
+		PSSpecifier *userSpec = [PSSpecifier preferenceSpecifierNamed:@"Username"
+			target:self set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:)
+			detail:NULL cell:PSEditTextCell edit:NULL];
+		[userSpec setProperty:kProfileEditUserKey forKey:PSKeyNameKey];
+		[userSpec setProperty:self.userValue forKey:PSDefaultValueKey];
+
+		PSSpecifier *passSpec = [PSSpecifier preferenceSpecifierNamed:@"Password"
+			target:self set:@selector(setPreferenceValue:specifier:) get:@selector(readPreferenceValue:)
+			detail:NULL cell:PSSecureEditTextCell edit:NULL];
+		[passSpec setProperty:kProfileEditPassKey forKey:PSKeyNameKey];
+		[passSpec setProperty:self.passValue forKey:PSDefaultValueKey];
+
+		_specifiers = [NSMutableArray arrayWithObjects:group, nameSpec, hostSpec, portSpec, typeSpec,
+			authGroup, userSpec, passSpec, nil];
 	}
 
 	return _specifiers;
@@ -102,6 +134,8 @@ static NSString * const kProfileEditTypeKey = @"type";
 	if ([key isEqualToString:kProfileEditHostKey]) { return self.hostValue ?: @""; }
 	if ([key isEqualToString:kProfileEditPortKey]) { return self.portValue ?: @""; }
 	if ([key isEqualToString:kProfileEditTypeKey]) { return @([self.typeValue isEqualToString:@"socks"]); }
+	if ([key isEqualToString:kProfileEditUserKey]) { return self.userValue ?: @""; }
+	if ([key isEqualToString:kProfileEditPassKey]) { return self.passValue ?: @""; }
 	return nil;
 }
 
@@ -122,6 +156,10 @@ static NSString * const kProfileEditTypeKey = @"type";
 		self.portValue = string;
 	} else if ([key isEqualToString:kProfileEditTypeKey]) {
 		self.typeValue = [value boolValue] ? @"socks" : @"http";
+	} else if ([key isEqualToString:kProfileEditUserKey]) {
+		self.userValue = string;
+	} else if ([key isEqualToString:kProfileEditPassKey]) {
+		self.passValue = string;
 	}
 }
 
@@ -156,8 +194,19 @@ static NSString * const kProfileEditTypeKey = @"type";
 	}
 	NSString *value = [NSString stringWithFormat:@"%@:%d", host, port];
 	NSString *type = [self.typeValue isEqualToString:@"socks"] ? @"socks" : @"http";
-	NSDictionary *profile = @{@"name": name, @"value": value, @"type": type};
 
+	NSString *user = [self.userValue stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+	NSString *pass = self.passValue ?: @"";
+	BOOL socks = [type isEqualToString:@"socks"];
+	BOOL hasAuth = (user.length > 0);
+	NSMutableDictionary *profile = [@{@"name": name, @"value": value, @"type": type} mutableCopy];
+	profile[@"hasAuth"] = @(hasAuth);
+
+	if (hasAuth) {
+		[PSNCredentialClient setHost:host port:port socks:socks username:user password:pass];
+	} else {
+		[PSNCredentialClient deleteHost:host port:port socks:socks];
+	}
 	[PSNRootListController addOrUpdateProfile:profile atIndex:self.profileIndex];
 
 	[self.navigationController popViewControllerAnimated:YES];

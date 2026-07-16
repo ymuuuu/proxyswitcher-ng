@@ -15,10 +15,10 @@ include $(THEOS)/makefiles/common.mk
 
 BUNDLE_NAME = ProxySwitcherNG
 
-ProxySwitcherNG_FILES = PSNRootListController.m PSNProfileEditController.m PSNLogsController.m
+ProxySwitcherNG_FILES = PSNRootListController.m PSNProfileEditController.m PSNLogsController.m PSNCredentialClient.m ../common/PSNProxyAuth.m ../common/PSNSocketUtil.m ../common/PSNCredIPC.m
 ProxySwitcherNG_FRAMEWORKS = UIKit
 ProxySwitcherNG_PRIVATE_FRAMEWORKS = Preferences
 ProxySwitcherNG_INSTALL_PATH = /Library/PreferenceBundles
-ProxySwitcherNG_CFLAGS = -fobjc-arc
+ProxySwitcherNG_CFLAGS = -fobjc-arc -I../common
 
 include $(THEOS_MAKE_PATH)/bundle.mk
