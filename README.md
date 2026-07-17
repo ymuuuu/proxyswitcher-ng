@@ -40,7 +40,7 @@ every time. Set your proxies once, then flip between them.
 - **Logs when you want them.** Turn on logging to see exactly what the daemon did,
   readable from a Logs page inside the app.
 - **Authenticated proxies.** A profile (or the manual entry) can carry a username
-  and password — flip on **Use authentication** and the fields appear. Because iOS
+  and password. Flip on **Use authentication** and the fields appear. Because iOS
   ignores system-proxy credentials, the tweak runs a small loopback relay inside the
   root daemon that performs the authenticated upstream handshake itself. Credentials
   live in the daemon's keychain, never in cfprefs or logs. See
@@ -80,14 +80,14 @@ standalone arm64 launch daemon. They talk over a shared prefs domain
 ## Authentication
 
 Some proxies want a username and password. iOS makes this awkward: if you put
-credentials into the system proxy settings, it **ignores them** — an HTTP proxy
+credentials into the system proxy settings, it **ignores them**. An HTTP proxy
 just pops the 407 auth dialog it cannot answer inside a `CONNECT` tunnel, and the
 built-in SOCKS client only ever offers "no authentication," never the user/pass
 method. So the credentials you type would go nowhere.
 
-The tweak gets around this the same way apps like Potatso and Shadowrocket do —
-by running its own proxy on the device and letting *that* speak the authenticated
-handshake — only lighter, with no VPN. When a profile has credentials, the daemon
+The tweak gets around this the same way apps like Potatso and Shadowrocket do, by
+running its own proxy on the device and letting *that* speak the authenticated
+handshake, only lighter, with no VPN. When a profile has credentials, the daemon
 starts a tiny **loopback relay** and points the system Wi-Fi proxy at it:
 
 ```
@@ -111,7 +111,7 @@ proxy, exactly as before.
 Where the password lives matters:
 
 - It is stored in the **daemon's keychain** (`kSecClassInternetPassword`,
-  accessible `AfterFirstUnlockThisDeviceOnly`) — never written to the prefs plist,
+  accessible `AfterFirstUnlockThisDeviceOnly`); never written to the prefs plist,
   never printed to a log line.
 - The Settings panel hands new credentials to the daemon over a local UNIX socket,
   in memory; nothing sensitive is left on disk by the UI.
@@ -140,7 +140,7 @@ potholes.
   *name string* instead of the `Class` object. Now passes the class itself.
 - **Auth toggle + tidier profile rows.** A "Use authentication" switch on both the
   manual-entry and edit-profile screens shows the username/password fields only when
-  you want them. Each profile row is now two lines — name and address on top, protocol
+  you want them. Each profile row is now two lines: name and address on top, protocol
   and auth status (`HTTP · Auth enabled` / `SOCKS · No auth`) in smaller text below.
 - **Authenticated proxy support.** Profiles can carry a username and password; an
   in-daemon loopback relay authenticates upstream with HTTP Basic or SOCKS5
