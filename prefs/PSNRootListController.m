@@ -4,6 +4,7 @@
 #import "PSNSocketUtil.h"
 #import "PSNProxyAuth.h"
 #import "PSNCredentialClient.h"
+#import "PSNProfileCell.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
@@ -158,6 +159,12 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 
 + (BOOL)parseHostPort:(NSString *)value host:(NSString **)outHost port:(NSNumber **)outPort;
 
+@property (nonatomic, strong) PSSpecifier *manualAuthToggleSpec;
+@property (nonatomic, strong) PSSpecifier *manualUserSpec;
+@property (nonatomic, strong) PSSpecifier *manualPassSpec;
+@property (nonatomic, copy) NSString *manualUsername;
+@property (nonatomic, copy) NSString *manualPassword;
+
 - (UIButton *)iconButtonNamed:(NSString *)name URLString:(NSString *)URLString;
 - (void)openLink:(UIButton *)sender;
 
@@ -290,6 +297,8 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 			_specifiers = [NSMutableArray array];
 		}
 
+		[self injectManualAuthSpecifiers];
+
 		NSArray *profiles = [PSNRootListController readProfiles];
 		NSArray *profileSpecs = [self profileSpecifiersForProfiles:profiles];
 
@@ -308,6 +317,217 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 	}
 
 	return _specifiers;
+}
+
+- (void)injectManualAuthSpecifiers {
+	PSSpecifier *useSocks = nil;
+	for (PSSpecifier *s in _specifiers) {
+		if ([[s propertyForKey:PSKeyNameKey] isEqualToString:@"useSocks"]) {
+			useSocks = s;
+			break;
+		}
+	}
+	if (!useSocks) { return; }
+
+	BOOL manualAuth = [self readManualAuthBool];
+
+	PSSpecifier *toggle = [PSSpecifier preferenceSpecifierNamed:@"Use authentication"
+														 target:self
+															set:@selector(setManualAuth:specifier:)
+															get:@selector(readManualAuth:)
+														 detail:NULL
+															cell:PSSwitchCell
+															 edit:NULL];
+	[toggle setProperty:@"manualAuth" forKey:PSKeyNameKey];
+	[toggle setProperty:@(manualAuth) forKey:PSDefaultValueKey];
+	self.manualAuthToggleSpec = toggle;
+
+	PSSpecifier *user = [PSSpecifier preferenceSpecifierNamed:@"Username"
+													 target:self
+														set:@selector(setManualAuthValue:specifier:)
+														get:@selector(readManualAuthValue:)
+													   detail:NULL
+														cell:PSEditTextCell
+														 edit:NULL];
+	[user setProperty:@"manualUsername" forKey:PSKeyNameKey];
+	self.manualUserSpec = user;
+
+	PSSpecifier *pass = [PSSpecifier preferenceSpecifierNamed:@"Password"
+													 target:self
+														set:@selector(setManualAuthValue:specifier:)
+														get:@selector(readManualAuthValue:)
+													   detail:NULL
+														cell:PSSecureEditTextCell
+														 edit:NULL];
+	[pass setProperty:@"manualPassword" forKey:PSKeyNameKey];
+	self.manualPassSpec = pass;
+
+	NSUInteger idx = [_specifiers indexOfObjectIdenticalTo:useSocks];
+	if (idx == NSNotFound) { idx = _specifiers.count - 1; }
+	[_specifiers insertObject:toggle atIndex:idx + 1];
+
+	if (manualAuth) {
+		NSString *server = [self readManualServer];
+		NSNumber *port = [self readManualPort];
+		BOOL socks = [self readManualUseSocks];
+		if (server.length > 0 && port != nil) {
+			NSString *u = nil, *p = nil;
+			if ([PSNCredentialClient getHost:server port:port.intValue socks:socks username:&u password:&p]) {
+				self.manualUsername = u ?: @"";
+				// Password is never prefilled; field always starts blank on reload.
+			}
+		}
+		[user setProperty:self.manualUsername ?: @"" forKey:PSDefaultValueKey];
+		[pass setProperty:@"" forKey:PSDefaultValueKey];
+		[_specifiers insertObject:user atIndex:idx + 2];
+		[_specifiers insertObject:pass atIndex:idx + 3];
+	} else {
+		self.manualUsername = @"";
+		self.manualPassword = @"";
+	}
+}
+
+- (NSString *)readManualServer {
+	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	NSString *server = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("server"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	return [server isKindOfClass:[NSString class]] ? server : @"";
+}
+
+- (NSNumber *)readManualPort {
+	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	id portValue = (__bridge_transfer id)CFPreferencesCopyValue(CFSTR("port"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	NSInteger port = 0;
+	if ([portValue isKindOfClass:[NSNumber class]]) {
+		port = [(NSNumber *)portValue integerValue];
+	} else if ([portValue isKindOfClass:[NSString class]]) {
+		port = [(NSString *)portValue integerValue];
+	}
+	if (port > 0 && port <= 65535) { return @(port); }
+	return nil;
+}
+
+- (BOOL)readManualUseSocks {
+	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	id useSocksVal = (__bridge_transfer id)CFPreferencesCopyValue(CFSTR("useSocks"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	return [useSocksVal isKindOfClass:[NSNumber class]] ? [(NSNumber *)useSocksVal boolValue] : NO;
+}
+
+- (BOOL)readManualAuthBool {
+	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFBooleanRef cfValue = CFPreferencesCopyValue(CFSTR("manualAuth"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	if (!cfValue) { return NO; }
+	if (CFGetTypeID(cfValue) != CFBooleanGetTypeID()) {
+		CFRelease(cfValue);
+		return NO;
+	}
+	BOOL result = CFBooleanGetValue(cfValue);
+	CFRelease(cfValue);
+	return result;
+}
+
+- (id)readManualAuth:(PSSpecifier *)specifier {
+	return @([self readManualAuthBool]);
+}
+
+- (void)setManualAuth:(id)value specifier:(PSSpecifier *)specifier {
+	BOOL on = [value boolValue];
+	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFPreferencesSetValue(CFSTR("manualAuth"), (__bridge CFPropertyListRef)@(on), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+
+	if (!on) {
+		[self deleteManualCredentials];
+		self.manualUsername = @"";
+		self.manualPassword = @"";
+	}
+
+	[PSNRootListController postSettingsChanged];
+
+	if (on) {
+		// Prefill the username from the keychain so an existing credential shows up
+		// immediately when auth is re-enabled (mirrors the edit-profile screen).
+		NSString *server = [self readManualServer];
+		NSNumber *port = [self readManualPort];
+		if (server.length > 0 && port != nil) {
+			NSString *u = nil, *p = nil;
+			if ([PSNCredentialClient getHost:server port:port.intValue socks:[self readManualUseSocks] username:&u password:&p]) {
+				self.manualUsername = u ?: @"";
+			}
+		}
+		if ([_specifiers indexOfObjectIdenticalTo:self.manualUserSpec] == NSNotFound) {
+			[self insertSpecifier:self.manualUserSpec afterSpecifier:self.manualAuthToggleSpec animated:YES];
+		}
+		if ([_specifiers indexOfObjectIdenticalTo:self.manualPassSpec] == NSNotFound) {
+			[self insertSpecifier:self.manualPassSpec afterSpecifier:self.manualUserSpec animated:YES];
+		}
+	} else {
+		if ([_specifiers indexOfObjectIdenticalTo:self.manualUserSpec] != NSNotFound) {
+			[self removeSpecifier:self.manualUserSpec animated:YES];
+		}
+		if ([_specifiers indexOfObjectIdenticalTo:self.manualPassSpec] != NSNotFound) {
+			[self removeSpecifier:self.manualPassSpec animated:YES];
+		}
+	}
+}
+
+- (id)readManualAuthValue:(PSSpecifier *)specifier {
+	NSString *key = [specifier propertyForKey:PSKeyNameKey];
+	if ([key isEqualToString:@"manualUsername"]) { return self.manualUsername ?: @""; }
+	if ([key isEqualToString:@"manualPassword"]) { return self.manualPassword ?: @""; }
+	return @"";
+}
+
+- (void)setManualAuthValue:(id)value specifier:(PSSpecifier *)specifier {
+	NSString *key = [specifier propertyForKey:PSKeyNameKey];
+	NSString *string = @"";
+	if ([value isKindOfClass:[NSString class]]) {
+		string = value;
+	} else if (value) {
+		string = [value description];
+	}
+	if ([key isEqualToString:@"manualUsername"]) {
+		self.manualUsername = string;
+	} else if ([key isEqualToString:@"manualPassword"]) {
+		self.manualPassword = string;
+	}
+	[self saveManualCredentials];
+}
+
+- (void)saveManualCredentials {
+	if (![self readManualAuthBool]) { return; }
+	NSString *server = [self readManualServer];
+	NSNumber *port = [self readManualPort];
+	if (server.length == 0 || port == nil) { return; }
+	BOOL socks = [self readManualUseSocks];
+	NSString *user = [self.manualUsername stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+	NSString *pass = self.manualPassword ?: @"";
+	if (user.length > 0) {
+		// Password field is blank on reload; editing the username alone must not
+		// wipe the stored password. Preserve the existing keychain password when
+		// the user did not type a new one.
+		if (pass.length == 0) {
+			NSString *eu = nil, *ep = nil;
+			if ([PSNCredentialClient getHost:server port:port.intValue socks:socks username:&eu password:&ep] && ep.length > 0) {
+				pass = ep;
+			}
+		}
+		[PSNCredentialClient setHost:server port:port.intValue socks:socks username:user password:pass];
+	} else {
+		[PSNCredentialClient deleteHost:server port:port.intValue socks:socks];
+	}
+	[PSNRootListController postSettingsChanged];
+}
+
+- (void)deleteManualCredentials {
+	NSString *server = [self readManualServer];
+	NSNumber *port = [self readManualPort];
+	if (server.length == 0 || port == nil) { return; }
+	BOOL socks = [self readManualUseSocks];
+	[PSNCredentialClient deleteHost:server port:port.intValue socks:socks];
 }
 
 - (NSArray *)aboutSpecifiers {
@@ -364,7 +584,9 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 		if (name.length == 0) { name = @"(untitled)"; }
 
 		NSString *typeLabel = [type isEqualToString:@"socks"] ? @"SOCKS" : @"HTTP";
-		NSString *title = [NSString stringWithFormat:@"%@ (%@) - %@", name, value, typeLabel];
+		NSString *title = [NSString stringWithFormat:@"%@ (%@)", name, value];
+		BOOL hasAuth = [profile[@"hasAuth"] boolValue];
+		NSString *subtitle = [NSString stringWithFormat:@"%@ · %@", typeLabel, hasAuth ? @"Auth enabled" : @"No auth"];
 		PSSpecifier *specifier = [PSSpecifier preferenceSpecifierNamed:title
 															  target:self
 																set:NULL
@@ -378,6 +600,8 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 		[specifier setProperty:value forKey:kProfileValueKey];
 		[specifier setProperty:@(i) forKey:kProfileIndexKey];
 		[specifier setProperty:type forKey:@"psnProfileType"];
+		[specifier setProperty:@"PSNProfileCell" forKey:@"cellClass"];
+		[specifier setProperty:subtitle forKey:@"psnSubtitle"];
 		[specifiers addObject:specifier];
 	}
 
