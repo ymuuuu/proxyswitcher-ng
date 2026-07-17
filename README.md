@@ -89,6 +89,9 @@ potholes.
 
 ### Unreleased
 
+- **Fix:** Settings crashed on open (SIGABRT) as soon as the Profiles list drew,
+  because the custom profile-row cell class was handed to the specifier as a class
+  *name string* instead of the `Class` object. Now passes the class itself.
 - **Auth toggle + tidier profile rows.** A "Use authentication" switch on both the
   manual-entry and edit-profile screens shows the username/password fields only when
   you want them. Each profile row is now two lines — name and address on top, protocol

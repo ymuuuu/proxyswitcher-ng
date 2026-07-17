@@ -600,7 +600,12 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 		[specifier setProperty:value forKey:kProfileValueKey];
 		[specifier setProperty:@(i) forKey:kProfileIndexKey];
 		[specifier setProperty:type forKey:@"psnProfileType"];
-		[specifier setProperty:@"PSNProfileCell" forKey:@"cellClass"];
+		// Must be the Class object, not the class-name string: this Preferences
+		// build's -[PSSpecifier cellClass] returns the property as-is (no
+		// NSClassFromString), so a string here makes cell creation send a Class
+		// message (+alloc) to an NSString -> unrecognized selector -> SIGABRT when
+		// the Profiles list renders. A Class is safe for both getter behaviours.
+		[specifier setProperty:[PSNProfileCell class] forKey:@"cellClass"];
 		[specifier setProperty:subtitle forKey:@"psnSubtitle"];
 		[specifiers addObject:specifier];
 	}
