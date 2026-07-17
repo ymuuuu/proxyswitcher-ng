@@ -89,6 +89,10 @@ potholes.
 
 ### Unreleased
 
+- **Auth toggle + tidier profile rows.** A "Use authentication" switch on both the
+  manual-entry and edit-profile screens shows the username/password fields only when
+  you want them. Each profile row is now two lines — name and address on top, protocol
+  and auth status (`HTTP · Auth enabled` / `SOCKS · No auth`) in smaller text below.
 - **Authenticated proxy support.** Profiles can carry a username and password; an
   in-daemon loopback relay authenticates upstream with HTTP Basic or SOCKS5
   user/pass, and credentials live in the keychain.
