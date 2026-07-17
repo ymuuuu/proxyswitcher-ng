@@ -10,5 +10,9 @@
     <true/>
     <key>com.apple.private.security.no-sandbox</key>
     <true/>
+    <key>keychain-access-groups</key>
+    <array>
+        <string>io.ymuu.proxyswitcherng</string>
+    </array>
 </dict>
 </plist>

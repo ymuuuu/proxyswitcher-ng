@@ -1,4 +1,6 @@
 #import "PSNWiFiProxyHandler.h"
+#import "PSNCredentialStore.h"
+#import "PSNProxyRelay.h"
 #import "SCNetworkHeader.h"
 #import <CoreFoundation/CoreFoundation.h>
 
@@ -144,10 +146,31 @@ static void PSFileLog(NSString *format, ...) {
     }
 
     NSString *type = [useSocks boolValue] ? @"socks" : @"http";
-
     BOOL enabledBool = enabled ? [enabled boolValue] : YES;
     BOOL shouldEnable = enabledBool && (server.length > 0) && (port != nil);
-    [self updateProxy:shouldEnable server:server port:port type:type];
+
+    NSString *effServer = server;
+    NSNumber *effPort = port;
+    if (shouldEnable) {
+        BOOL socks = [type isEqualToString:@"socks"];
+        PSNProxyKind kind = socks ? PSNProxyKindSOCKS : PSNProxyKindHTTP;
+        PSNCredential *cred = [PSNCredentialStore lookupHost:server port:port.intValue kind:kind];
+        if (cred && cred.username.length > 0) {
+            [[PSNProxyRelay sharedInstance] configureUpstreamHost:server port:port.intValue
+                                                            socks:socks
+                                                         username:cred.username
+                                                         password:cred.password];
+            effServer = @"127.0.0.1";
+            effPort = @(kPSNRelayPort);
+            PSLog(@"[proxyswitcherngd] auth profile: routing %@ via relay 127.0.0.1:%d", server, kPSNRelayPort);
+        } else {
+            [[PSNProxyRelay sharedInstance] clearUpstream];
+        }
+    } else {
+        [[PSNProxyRelay sharedInstance] clearUpstream];
+    }
+
+    [self updateProxy:shouldEnable server:effServer port:effPort type:type];
 }
 
 - (void)updateProxy:(BOOL)enabled server:(NSString *)server port:(NSNumber *)port type:(NSString *)type {
@@ -205,8 +228,6 @@ static void PSFileLog(NSString *format, ...) {
         CFRelease(prefs);
         return;
     }
-
-    //TODO: proxy auth (keychain)
 
     BOOL shouldWrite = NO;
     if (enabled) {
