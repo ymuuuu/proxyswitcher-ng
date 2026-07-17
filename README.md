@@ -155,11 +155,6 @@ potholes.
 - **Universal build.** The preference bundle now ships both arm64 and arm64e
   slices, so it loads on A11 and older devices (iPhone 8 / X) as well as A12+.
 
-### Earlier
-
-- Saved proxy profiles (add, edit, delete, select) from Settings.
-- Single on/off toggle, logging console with a Logs page, per-build versioning,
-  Settings icon, signed Sileo repo.
 
 ## Credit
 
