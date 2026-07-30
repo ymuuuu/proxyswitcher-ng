@@ -20,3 +20,6 @@ scripts/
 spike/
 docs/
 .history-backup.bundle
+
+# Local agent context, not shipped
+CLAUDE.md
