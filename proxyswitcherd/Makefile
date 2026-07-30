@@ -6,10 +6,11 @@ TOOL_NAME = proxyswitcherngd
 # refuses to exec ("Bad CPU type in executable"). A plain arm64 process is not
 # injected into an arm64e host, so it has no arm64e requirement and runs fine.
 proxyswitcherngd_ARCHS = arm64
-proxyswitcherngd_FILES = main.m PSNWiFiProxyHandler.m PSNProxyRelay.m PSNCredentialStore.m PSNCredentialService.m ../common/PSNProxyAuth.m ../common/PSNSocketUtil.m ../common/PSNCredIPC.m ../common/PSNLog.m ../common/PSNHostPort.m ../common/PSNPrefKeys.m ../common/PSNSNISniffer.m
+proxyswitcherngd_FILES = main.m PSNWiFiProxyHandler.m PSNProxyRelay.m PSNCredentialStore.m PSNCredentialService.m PSNTunnelDevice.m PSNTunnelNet.c ../common/PSNProxyAuth.m ../common/PSNSocketUtil.m ../common/PSNCredIPC.m ../common/PSNLog.m ../common/PSNHostPort.m ../common/PSNPrefKeys.m ../common/PSNSNISniffer.m
 proxyswitcherngd_FRAMEWORKS = Foundation SystemConfiguration Security
 proxyswitcherngd_CODESIGN_FLAGS = -Sentitlements.plist
 proxyswitcherngd_INSTALL_PATH = /usr/bin
+ADDITIONAL_CFLAGS = -I../common
 ADDITIONAL_OBJCFLAGS = -fobjc-arc -I../common
 
 include $(THEOS_MAKE_PATH)/tool.mk

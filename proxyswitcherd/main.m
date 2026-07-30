@@ -5,6 +5,10 @@
 #import "PSNProxyAuth.h"
 #import "PSNNetKernel.h"
 #import "PSNSNISniffer.h"
+#import "PSNTunnelNet.h"
+#import "PSNTunnelDevice.h"
+#import <arpa/inet.h>
+#import <net/if.h>
 
 static BOOL PSExpect(NSString *input, BOOL wantOK, NSString *wantHost, int wantPort) {
     NSString *host = nil; NSNumber *port = nil;
@@ -178,6 +182,25 @@ static int PSRunSelfTest(void) {
                 ok3 ? "PASS" : "FAIL", h3 ? h3.UTF8String : "(nil)");
         fails += !ok3;
     }
+    {
+        struct in_addr ip, ifa, mask;
+        inet_pton(AF_INET, "192.168.100.50", &ip);
+        inet_pton(AF_INET, "192.168.100.7", &ifa);
+        inet_pton(AF_INET, "255.255.255.0", &mask);
+        BOOL inLan = PSNIPv4CoveredBySubnet(ip, ifa, mask);
+        inet_pton(AF_INET, "8.8.8.8", &ip);
+        BOOL outLan = PSNIPv4CoveredBySubnet(ip, ifa, mask);
+        inet_pton(AF_INET, "10.99.0.1", &ip);
+        inet_pton(AF_INET, "10.99.0.1", &ifa);
+        inet_pton(AF_INET, "255.255.255.255", &mask);
+        BOOL hostSelf = PSNIPv4CoveredBySubnet(ip, ifa, mask);
+        inet_pton(AF_INET, "0.0.0.0", &mask);
+        BOOL zeroMask = PSNIPv4CoveredBySubnet(ip, ifa, mask);
+        BOOL ok = inLan && !outLan && hostSelf && !zeroMask;
+        fprintf(stderr, "[selftest] %s subnet cover (lan=%d out=%d host=%d zeromask=%d)\n",
+                ok ? "PASS" : "FAIL", inLan, outLan, hostSelf, zeroMask);
+        fails += !ok;
+    }
     fprintf(stderr, "[selftest] %s (%d failures)\n", fails ? "OVERALL FAIL" : "OVERALL PASS", fails);
     return fails ? 1 : 0;
 }
@@ -212,9 +235,80 @@ static void networkChanged(CFNotificationCenterRef center,
     [[PSNWiFiProxyHandler sharedInstance] applyFromPreferences];
 }
 
+// On-device, non-destructive smoke test for the route ops: a /32 into
+// TEST-NET-2 (198.51.100.0/24, unroutable by definition) via the PHYSICAL
+// gateway, then removed again. No tunnel routes, no utun, no default-route
+// change - a failure here can at worst leave one harmless TEST-NET route.
+static int PSRunNetSelfTest(void) {
+    int fails = 0;
+
+    // Initialized because PSNDefaultRoute4 writes no out-param when it fails,
+    // and the line below formats them either way.
+    struct in_addr gw = { .s_addr = 0 };
+    unsigned idx = 0;
+    char ifname[IFNAMSIZ] = {0};
+    BOOL haveDefault = PSNDefaultRoute4(&gw, &idx, ifname, sizeof(ifname));
+    char gwStr[INET_ADDRSTRLEN] = "?";
+    inet_ntop(AF_INET, &gw, gwStr, sizeof(gwStr));
+    fprintf(stderr, "[selftest-net] %s default route via %s dev %s (idx %u)\n",
+            haveDefault ? "PASS" : "FAIL", gwStr, ifname, idx);
+    fails += !haveDefault;
+    if (!haveDefault) { return fails; }
+
+    struct in_addr probe;
+    inet_pton(AF_INET, "198.51.100.1", &probe);   // TEST-NET-2, unroutable
+
+    int err = 0;
+    BOOL add1 = PSNRoute4Op(true, probe, -1, gw, idx, &err);
+    fprintf(stderr, "[selftest-net] %s add 198.51.100.1/32 (%s)\n",
+            add1 ? "PASS" : "FAIL", add1 ? "ok" : strerror(err));
+    fails += !add1;
+
+    BOOL add2 = PSNRoute4Op(true, probe, -1, gw, idx, &err);   // EEXIST-proof path
+    fprintf(stderr, "[selftest-net] %s re-add (EEXIST-proof)\n", add2 ? "PASS" : "FAIL");
+    fails += !add2;
+
+    BOOL del1 = PSNRoute4Op(false, probe, -1, gw, idx, &err);
+    BOOL del2 = PSNRoute4Op(false, probe, -1, gw, idx, &err);  // ESRCH-tolerant
+    fprintf(stderr, "[selftest-net] %s delete idempotent (%d/%d)\n",
+            (del1 && del2) ? "PASS" : "FAIL", del1, del2);
+    fails += !(del1 && del2);
+
+    // Registry + double teardown: nothing tracked here, so both must no-op.
+    PSNTunnelTeardown(false);
+    PSNTunnelTeardown(true);
+    fprintf(stderr, "[selftest-net] PASS empty teardown is a no-op\n");
+
+    // Device lifecycle: create (auto unit), configure, close. Idempotent
+    // teardown afterwards must still be a no-op.
+    PSNTunnelDevice *dev = [PSNTunnelDevice new];
+    BOOL opened = [dev openDevice] && [dev configureInterfaces];
+    fprintf(stderr, "[selftest-net] %s utun create+configure (%s fd=%d idx=%u v6=%d)\n",
+            opened ? "PASS" : "FAIL", dev.interfaceName.UTF8String ?: "?",
+            dev.fd, dev.interfaceIndex, dev.ipv6Ready);
+    fails += !opened;
+
+    struct in_addr gw2; unsigned idx2 = 0;
+    BOOL defaultIntact = PSNDefaultRoute4(&gw2, &idx2, NULL, 0) && (idx2 == idx);
+    fprintf(stderr, "[selftest-net] %s default route untouched by utun\n",
+            defaultIntact ? "PASS" : "FAIL");
+    fails += !defaultIntact;
+
+    [dev closeDevice];
+    PSNTunnelTeardown(false);   // registry was untracked; must be a no-op
+    fprintf(stderr, "[selftest-net] PASS utun closed, teardown no-op\n");
+
+    fprintf(stderr, "[selftest-net] %s (%d failures)\n",
+            fails ? "OVERALL FAIL" : "OVERALL PASS", fails);
+    return fails ? 1 : 0;
+}
+
 int main(int argc, char **argv, char **envp) {
     if (argc > 1 && strcmp(argv[1], "--selftest") == 0) {
         @autoreleasepool { return PSRunSelfTest(); }
+    }
+    if (argc > 1 && strcmp(argv[1], "--selftest-net") == 0) {
+        @autoreleasepool { return PSRunNetSelfTest(); }
     }
     NSLog(@"[proxyswitcherngd] launched");
 
