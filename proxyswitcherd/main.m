@@ -301,6 +301,42 @@ static int PSRunNetSelfTest(void) {
     PSNTunnelTeardown(false);   // registry was untracked; must be a no-op
     fprintf(stderr, "[selftest-net] PASS utun closed, teardown no-op\n");
 
+    // Regression for the device-test-1 deadlock: with the takeover pair
+    // 0.0.0.0/1 + 128.0.0.0/1 installed via a utun, PSNDefaultRoute4 must
+    // STILL return the physical gateway. An RTM_GET lookup returns the
+    // tunnel peer here (0.0.0.0 matches the /1, which beats /0); the sysctl
+    // dump must not. The /1 routes live only for the duration of this block:
+    // teardown removes them, and closing the fd would make the kernel purge
+    // them anyway - at worst a few milliseconds of blackhole inside a
+    // selftest that passes no traffic.
+    {
+        PSNTunnelDevice *devT = [PSNTunnelDevice new];   // openDevice tracks fd+ifindex
+        BOOL upT = [devT openDevice] && [devT configureInterfaces];
+        struct in_addr peerT;
+        inet_pton(AF_INET, kPSNTunPeerIPv4.UTF8String, &peerT);
+        BOOL t1 = NO, t2 = NO;
+        if (upT) {
+            int eT = 0;
+            t1 = PSNRoute4Op(true, (struct in_addr){ .s_addr = 0 },                1, peerT, devT.interfaceIndex, &eT);
+            t2 = PSNRoute4Op(true, (struct in_addr){ .s_addr = htonl(0x80000000) }, 1, peerT, devT.interfaceIndex, &eT);
+        }
+        if (t1 && t2) { PSNTeardownTrackDef1(); }   // so teardown removes them
+
+        struct in_addr gwT = { .s_addr = 0 };
+        unsigned idxT = 0;
+        char ifnT[IFNAMSIZ] = {0};
+        BOOL stillPhys = PSNDefaultRoute4(&gwT, &idxT, ifnT, sizeof(ifnT)) &&
+                         gwT.s_addr == gw.s_addr && idxT == idx;
+        char gwTStr[INET_ADDRSTRLEN] = "?";
+        inet_ntop(AF_INET, &gwT, gwTStr, sizeof(gwTStr));
+        fprintf(stderr, "[selftest-net] %s default route stays physical with /1 takeover up (via %s dev %s)\n",
+                stillPhys ? "PASS" : "FAIL", gwTStr, ifnT);
+        fails += !(upT && t1 && t2 && stillPhys);
+
+        PSNTunnelTeardown(false);   // tracked def1: deletes both /1 routes
+        [devT closeDevice];         // untracks and closes; kernel would purge anyway
+    }
+
     fprintf(stderr, "[selftest-net] %s (%d failures)\n",
             fails ? "OVERALL FAIL" : "OVERALL PASS", fails);
     return fails ? 1 : 0;

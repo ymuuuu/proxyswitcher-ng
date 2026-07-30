@@ -48,10 +48,19 @@ struct sockaddr_ctl {
 #define RTF_GATEWAY             0x2
 #define RTF_HOST                0x4
 #define RTF_STATIC              0x800
+// Set on a route that only applies to sockets scoped to one interface. iOS
+// keeps a scoped default per cellular PDP context alongside the real one, so
+// a table walk that ignores this flag can pick cellular while Wi-Fi is
+// primary. netstat renders it as the "I" flag.
+#define RTF_IFSCOPE             0x1000000
 
 #define RTA_DST                 0x1
 #define RTA_GATEWAY             0x2
 #define RTA_NETMASK             0x4
+
+// sysctl MIB name for the routing-table dump, used by PSNDefaultRoute4:
+// { CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_DUMP, 0 }.
+#define NET_RT_DUMP             1
 
 struct rt_metrics {
     u_int32_t   rmx_locks;

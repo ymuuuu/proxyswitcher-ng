@@ -2,11 +2,13 @@
 #include "PSNNetKernel.h"
 
 #include <sys/socket.h>
+#include <sys/sysctl.h>
 #include <net/if.h>
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <unistd.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #include <signal.h>
 
@@ -154,60 +156,112 @@ bool PSNRoute6Op(bool add, struct in6_addr dst, int prefixBits,
     return false;
 }
 
+#pragma mark - teardown registry storage
+
+// One exclusion entry: dst/32 via gw on ifindex. Sized for 1 upstream proxy +
+// a handful of DNS resolvers; fixed storage because there is no malloc on the
+// signal path. Declared above the default-route query because that query
+// reads gTunIdx (it must never return our own utun as "the physical
+// gateway"); the registry functions themselves are further down.
+#define PSN_MAX_EXCLUSIONS 12
+typedef struct { struct in_addr ip, gw; unsigned ifindex; } PSNExclusion;
+
+static int          gUtunFd  = -1;
+static unsigned     gTunIdx  = 0;
+static struct in_addr  gPeer4;
+static struct in6_addr gPeer6;
+static PSNExclusion gExcl[PSN_MAX_EXCLUSIONS];
+
+static volatile sig_atomic_t gHaveDef1   = 0;
+static volatile sig_atomic_t gHaveDef1v6 = 0;
+static volatile sig_atomic_t gExclCount  = 0;
+
 #pragma mark - default route query
 
+// sysctl NET_RT_DUMP table walk - NOT RTM_GET. RTM_GET on 0.0.0.0 is a route
+// LOOKUP for the address 0.0.0.0, and once the 0.0.0.0/1 takeover exists the
+// lookup matches that /1 (more specific than /0): it returns the tunnel peer
+// and the utun's index as "the physical gateway". The next start call then
+// installed the upstream /32 exclusion INTO the tunnel and deadlocked every
+// flow (device test 1, docs/L3-TUNNEL-PROGRESS.md). The dump is a table
+// query: the default route is the entry whose destination AND netmask are
+// both 0.0.0.0 - not any route that merely covers 0.0.0.0.
+//
+// The malloc here is fine: this function is NOT reachable from the signal
+// path (only PSNTunnelTeardown is). Everything PSNTunnelTeardown can call
+// remains socket/write/close/memcpy-only.
 bool PSNDefaultRoute4(struct in_addr *gwOut, unsigned *ifindexOut,
                       char *ifnameOut, size_t ifnameLen) {
-    int rs = socket(PF_ROUTE, SOCK_RAW, AF_INET);
-    if (rs < 0) { return false; }
+    int mib[6] = { CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_DUMP, 0 };
+    size_t needed = 0;
+    if (sysctl(mib, 6, NULL, &needed, NULL, 0) < 0 || needed == 0) { return false; }
+    char *buf = malloc(needed);
+    if (!buf) { return false; }
+    if (sysctl(mib, 6, buf, &needed, NULL, 0) < 0) { free(buf); return false; }
 
-    struct { struct rt_msghdr hdr; char payload[512]; } msg;
-    memset(&msg, 0, sizeof(msg));
+    bool ok = false;
+    char *lim = buf + needed;
+    for (char *next = buf; next < lim && !ok;) {
+        struct rt_msghdr *r = (struct rt_msghdr *)next;
+        if (r->rtm_msglen < (int)sizeof(struct rt_msghdr)) { break; }  // corrupt dump: stop
+        next += r->rtm_msglen;
 
-    struct sockaddr_in dst;
-    psn_sin(&dst, (struct in_addr){ .s_addr = 0 });        // 0.0.0.0 == default
-    memcpy(msg.payload, &dst, sizeof(dst));
+        if (!(r->rtm_flags & RTF_UP)) { continue; }
 
-    const int myseq = 4242;
-    msg.hdr.rtm_msglen  = (u_short)(sizeof(struct rt_msghdr) + PSN_RT_ROUNDUP(dst.sin_len));
-    msg.hdr.rtm_version = RTM_VERSION;
-    msg.hdr.rtm_type    = RTM_GET;
-    msg.hdr.rtm_addrs   = RTA_DST;
-    msg.hdr.rtm_pid     = getpid();
-    msg.hdr.rtm_seq     = myseq;
+        // Skip interface-scoped defaults. iOS keeps one per cellular PDP
+        // context beside the real default (device test 1 saw "default via
+        // 10.46.111.173 dev pdp_ip0" flagged I, next to the live Wi-Fi one).
+        // A scoped route only applies to sockets bound to that interface, and
+        // the relay binds to none - IP_BOUND_IF is proven not to escape the
+        // tunnel, so the /32 exclusion is the only mechanism and it has to sit
+        // on the unscoped path the relay actually uses. Taking a scoped entry
+        // would point the exclusion at cellular while Wi-Fi carries the
+        // traffic, and the upstream proxy on the LAN would be unreachable.
+        if (r->rtm_flags & RTF_IFSCOPE) { continue; }
 
-    if (write(rs, &msg, msg.hdr.rtm_msglen) < 0) { close(rs); return false; }
-
-    struct timeval tv = { .tv_sec = 3, .tv_usec = 0 };
-    setsockopt(rs, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    char buf[2048];
-    for (;;) {
-        ssize_t n = read(rs, buf, sizeof(buf));
-        if (n <= 0) { close(rs); return false; }
-        struct rt_msghdr *r = (struct rt_msghdr *)buf;
-        if (r->rtm_seq != myseq || r->rtm_pid != getpid()) { continue; }
-        if (r->rtm_errno != 0) { close(rs); return false; }
-
-        // Walk the sockaddr chain to find RTA_GATEWAY.
-        char *cp = buf + sizeof(struct rt_msghdr);
-        struct sockaddr *gw = NULL;
-        for (int i = 0; i < 8; i++) {
+        // Unpack the sockaddr chain by rtm_addrs bit position. A zero sa_len
+        // entry still occupies one uint32_t in the message (XNU SA_SIZE).
+        char *cp = (char *)r + sizeof(struct rt_msghdr);
+        char *end = next;
+        struct sockaddr *dst = NULL, *gw = NULL, *mask = NULL;
+        for (int i = 0; i < 8 && cp < end; i++) {
             if (!(r->rtm_addrs & (1 << i))) { continue; }
             struct sockaddr *sa = (struct sockaddr *)cp;
-            if ((1 << i) == RTA_GATEWAY) { gw = sa; }
+            if ((1 << i) == RTA_DST)          { dst = sa; }
+            else if ((1 << i) == RTA_GATEWAY) { gw = sa; }
+            else if ((1 << i) == RTA_NETMASK) { mask = sa; }
             cp += PSN_RT_ROUNDUP(sa->sa_len ? sa->sa_len : sizeof(uint32_t));
         }
 
-        // A default route whose gateway is link-level rather than an address
-        // (a point-to-point cellular interface, for instance) gives no next
-        // hop to hang a /32 exclusion off. Reporting 0.0.0.0 here would be
-        // indistinguishable from a real answer, and the caller would install
-        // an exclusion that cannot carry the relay's own upstream connection -
-        // the tunnel would then loop its traffic back into itself. Fail
-        // instead, so tunnel mode declines to start. Checked before any
-        // out-param is written so a false return leaves them all untouched.
-        if (gwOut && (!gw || gw->sa_family != AF_INET)) { close(rs); return false; }
+        // Destination must be exactly 0.0.0.0 ...
+        if (!dst || dst->sa_family != AF_INET ||
+            ((struct sockaddr_in *)dst)->sin_addr.s_addr != 0) { continue; }
+
+        // ... and the netmask exactly 0.0.0.0 (or absent/empty). That is what
+        // distinguishes the default route from the 0.0.0.0/1 takeover entry,
+        // which covers 0.0.0.0 but has mask 128.0.0.0.
+        if (mask && mask->sa_len > 0 && mask->sa_family == AF_INET &&
+            ((struct sockaddr_in *)mask)->sin_addr.s_addr != 0) { continue; }
+
+        // Defence in depth: never hand back our own tunnel, whatever the
+        // table says. gTunIdx is this file's teardown-registry state, read
+        // directly rather than duplicated.
+        if (gTunIdx != 0 && r->rtm_index == (u_short)gTunIdx) { continue; }
+
+        // Unchanged contract: a default route whose gateway is link-level
+        // rather than an address (a point-to-point cellular interface, for
+        // instance) gives no next hop to hang a /32 exclusion off. Reporting
+        // 0.0.0.0 here would be indistinguishable from a real answer, and the
+        // caller would install an exclusion that cannot carry the relay's own
+        // upstream connection - the tunnel would then loop its traffic back
+        // into itself. Fail instead, so tunnel mode declines to start. Done
+        // before any out-param is written so a false return leaves them all
+        // untouched.
+        // `continue`, not `break`: this is a table walk, so an unusable
+        // candidate must not abandon the search while a usable default may
+        // still follow it. If none qualifies the loop ends with ok == false,
+        // which is the same answer `break` would have given.
+        if (gwOut && (!gw || gw->sa_family != AF_INET)) { continue; }
 
         if (ifindexOut) { *ifindexOut = r->rtm_index; }
         if (ifnameOut && ifnameLen > 0) {
@@ -215,9 +269,11 @@ bool PSNDefaultRoute4(struct in_addr *gwOut, unsigned *ifindexOut,
             if_indextoname(r->rtm_index, ifnameOut);
         }
         if (gwOut) { *gwOut = ((struct sockaddr_in *)gw)->sin_addr; }
-        close(rs);
-        return true;   // plain C: `YES` is an <objc/objc.h> macro, not visible here
+        ok = true;
     }
+
+    free(buf);
+    return ok;
 }
 
 #pragma mark - subnet coverage
@@ -243,22 +299,6 @@ bool PSNIPv4CoveredByAnyLocalSubnet(struct in_addr ip) {
 }
 
 #pragma mark - teardown registry
-
-// One exclusion entry: dst/32 via gw on ifindex. Sized for 1 upstream proxy +
-// a handful of DNS resolvers; fixed storage because there is no malloc on the
-// signal path.
-#define PSN_MAX_EXCLUSIONS 12
-typedef struct { struct in_addr ip, gw; unsigned ifindex; } PSNExclusion;
-
-static int          gUtunFd  = -1;
-static unsigned     gTunIdx  = 0;
-static struct in_addr  gPeer4;
-static struct in6_addr gPeer6;
-static PSNExclusion gExcl[PSN_MAX_EXCLUSIONS];
-
-static volatile sig_atomic_t gHaveDef1   = 0;
-static volatile sig_atomic_t gHaveDef1v6 = 0;
-static volatile sig_atomic_t gExclCount  = 0;
 
 void PSNTeardownTrackUtun(int fd, unsigned ifindex,
                           struct in_addr peer4, struct in6_addr peer6) {

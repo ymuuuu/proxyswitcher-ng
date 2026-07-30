@@ -7,8 +7,10 @@
 
 // Plain-C routing-table operations and the teardown registry for tunnel mode.
 // Signal-safety contract: PSNTunnelTeardown and everything it calls use only
-// async-signal-safe calls (socket/write/close/memcpy). No ObjC, no malloc,
-// no logging anywhere in this file - the caller logs, on the normal path only.
+// async-signal-safe calls (socket/write/close/memcpy). No ObjC and no logging
+// anywhere in this file - the caller logs, on the normal path only. The one
+// allocation in this file is the sysctl dump buffer in PSNDefaultRoute4,
+// which is never reachable from the signal path.
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,11 +30,15 @@ bool PSNRoute4Op(bool add, struct in_addr dst, int maskBits,
 bool PSNRoute6Op(bool add, struct in6_addr dst, int prefixBits,
                  struct in6_addr gw, unsigned ifindex, int *errOut);
 
-// RTM_GET on 0.0.0.0: the current IPv4 default gateway, interface index and
-// name. Returns false when there is no default route (e.g. Wi-Fi down), and
-// also when gwOut was requested but the default route's gateway is link-level
-// rather than an address - a /32 exclusion needs a real next hop. On false no
-// out-param is written.
+// The current IPv4 default gateway, interface index and name, found by
+// walking the sysctl NET_RT_DUMP table and matching destination 0.0.0.0 with
+// netmask 0.0.0.0 - an RTM_GET lookup would match the 0.0.0.0/1 takeover
+// instead and return the tunnel peer (device test 1). Entries whose
+// interface is our own tracked utun are rejected outright. Returns false
+// when there is no default route (e.g. Wi-Fi down), and also when gwOut was
+// requested but the default route's gateway is link-level rather than an
+// address - a /32 exclusion needs a real next hop. On false no out-param is
+// written.
 bool PSNDefaultRoute4(struct in_addr *gwOut, unsigned *ifindexOut,
                       char *ifnameOut, size_t ifnameLen);
 

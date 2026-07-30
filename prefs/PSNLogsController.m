@@ -1,8 +1,8 @@
 #import "PSNLogsController.h"
+#import "PSNLog.h"
 #import <UIKit/UIKit.h>
 #import <CoreFoundation/CoreFoundation.h>
 
-static NSString * const kLogPath = @"/var/mobile/Library/Logs/ProxySwitcherNG.log";
 static NSString * const kClearLogNotification = @"io.ymuu.proxyswitcherng/clearlog";
 
 @interface PSNLogsController ()
@@ -37,7 +37,7 @@ static NSString * const kClearLogNotification = @"io.ymuu.proxyswitcherng/clearl
 }
 
 - (void)refresh:(id)sender {
-	NSString *text = [NSString stringWithContentsOfFile:kLogPath encoding:NSUTF8StringEncoding error:nil];
+	NSString *text = [NSString stringWithContentsOfFile:PSNLogPath() encoding:NSUTF8StringEncoding error:nil];
 	self.textView.text = text.length > 0 ? text : @"(empty)";
 	NSRange end = NSMakeRange(self.textView.text.length, 0);
 	[self.textView scrollRangeToVisible:end];

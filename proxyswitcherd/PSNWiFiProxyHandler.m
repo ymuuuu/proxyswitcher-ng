@@ -94,9 +94,20 @@
         tunnelMode = [preferences numberForKeySafely:kPSNPrefTunnelMode];
     }
 
+    if (!logging) {
+        // cfprefsd does not re-read a plist that was written behind its back
+        // (device-verified: docs/L3-TUNNEL-PROGRESS.md, finding 3), and
+        // scripted device testing writes this file directly - so a key that
+        // is on disk but unserved is user intent, not absence. Only the
+        // logging flag gets this fallback: wrongly-on costs a log file,
+        // wrongly-off cost device test 1 all of its observability.
+        NSDictionary *diskPrefs = [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/io.ymuu.proxyswitcherng.plist"];
+        logging = [diskPrefs objectForKey:@"logging"];
+    }
+
     PSNLogSetEnabled(logging ? [logging boolValue] : NO);
 
-    PSLog(@"[proxyswitcherngd] prefs source=%@ enabled=%@ server=%@ port=%@", source, enabled ?: @"(nil)", server ?: @"(nil)", port ?: @"(nil)");
+    PSLog(@"[proxyswitcherngd] prefs source=%@ enabled=%@ server=%@ port=%@ logging=%@", source, enabled ?: @"(nil)", server ?: @"(nil)", port ?: @"(nil)", logging ?: @"(nil)");
 
     if ([activeProxy isEqualToString:@"__none__"]) {
         PSLog(@"[proxyswitcherngd] activeProxy=__none__; forcing proxy off");
