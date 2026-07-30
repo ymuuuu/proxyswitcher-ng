@@ -5,6 +5,7 @@
 #import "PSNProxyAuth.h"
 #import "PSNCredentialClient.h"
 #import "PSNProfileCell.h"
+#import "PSNHostPort.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
@@ -266,28 +267,7 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 }
 
 + (BOOL)parseHostPort:(NSString *)value host:(NSString **)outHost port:(NSNumber **)outPort {
-	if (![value isKindOfClass:[NSString class]]) { return NO; }
-	NSCharacterSet *ws = [NSCharacterSet whitespaceAndNewlineCharacterSet];
-	NSString *trimmed = [value stringByTrimmingCharactersInSet:ws];
-	if (trimmed.length == 0) { return NO; }
-
-	NSRange colon = [trimmed rangeOfString:@":" options:NSBackwardsSearch];
-	if (colon.location == NSNotFound) { return NO; }
-
-	NSString *host = [[trimmed substringToIndex:colon.location] stringByTrimmingCharactersInSet:ws];
-	NSString *portStr = [[trimmed substringFromIndex:colon.location + 1] stringByTrimmingCharactersInSet:ws];
-	if (host.length == 0 || portStr.length == 0) { return NO; }
-
-	NSCharacterSet *digits = [NSCharacterSet characterSetWithCharactersInString:@"0123456789"];
-	NSCharacterSet *nonDigits = [digits invertedSet];
-	if ([portStr rangeOfCharacterFromSet:nonDigits].location != NSNotFound) { return NO; }
-
-	NSInteger port = [portStr integerValue];
-	if (port < 1 || port > 65535) { return NO; }
-
-	if (outHost) { *outHost = host; }
-	if (outPort) { *outPort = @(port); }
-	return YES;
+	return PSNParseHostPort(value, outHost, outPort);
 }
 
 - (NSArray *)specifiers {

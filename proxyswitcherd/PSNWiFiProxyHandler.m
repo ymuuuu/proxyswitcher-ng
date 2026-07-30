@@ -1,47 +1,10 @@
 #import "PSNWiFiProxyHandler.h"
 #import "PSNCredentialStore.h"
 #import "PSNProxyRelay.h"
+#import "PSNLog.h"
+#import "PSNHostPort.h"
 #import "SCNetworkHeader.h"
 #import <CoreFoundation/CoreFoundation.h>
-
-static NSString * const kLogPath = @"/var/mobile/Library/Logs/ProxySwitcherNG.log";
-static BOOL gLoggingEnabled = NO;
-
-static void PSAppendFileLog(NSString *line) {
-    if (line.length == 0) { return; }
-
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *dir = [kLogPath stringByDeletingLastPathComponent];
-    if (![fm fileExistsAtPath:dir]) {
-        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-    }
-
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ssZZZZZ"];
-    NSString *timestamp = [formatter stringFromDate:[NSDate date]];
-    NSString *entry = [NSString stringWithFormat:@"%@ %@\n", timestamp, line];
-
-    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:kLogPath];
-    if (handle) {
-        [handle seekToEndOfFile];
-        [handle writeData:[entry dataUsingEncoding:NSUTF8StringEncoding]];
-        [handle closeFile];
-    } else {
-        [entry writeToFile:kLogPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    }
-    [fm setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:kLogPath error:nil];
-}
-
-static void PSFileLog(NSString *format, ...) {
-    if (!gLoggingEnabled || !format) { return; }
-    va_list args;
-    va_start(args, format);
-    NSString *line = [[NSString alloc] initWithFormat:format arguments:args];
-    va_end(args);
-    PSAppendFileLog(line);
-}
-
-#define PSLog(format, ...) do { NSLog((format), ##__VA_ARGS__); PSFileLog((format), ##__VA_ARGS__); } while(0)
 
 @interface NSDictionary<KeyType, ObjectType> (Getters)
 
@@ -126,7 +89,7 @@ static void PSFileLog(NSString *format, ...) {
         useSocks = [preferences numberForKeySafely:@"useSocks"];
     }
 
-    gLoggingEnabled = logging ? [logging boolValue] : NO;
+    PSNLogSetEnabled(logging ? [logging boolValue] : NO);
 
     PSLog(@"[proxyswitcherngd] prefs source=%@ enabled=%@ server=%@ port=%@", source, enabled ?: @"(nil)", server ?: @"(nil)", port ?: @"(nil)");
 
@@ -387,28 +350,7 @@ static void PSFileLog(NSString *format, ...) {
 }
 
 + (BOOL)parseHostPort:(NSString *)value host:(NSString **)outHost port:(NSNumber **)outPort {
-    if (![value isKindOfClass:[NSString class]]) { return NO; }
-    NSCharacterSet *ws = [NSCharacterSet whitespaceAndNewlineCharacterSet];
-    NSString *trimmed = [value stringByTrimmingCharactersInSet:ws];
-    if (trimmed.length == 0) { return NO; }
-
-    NSRange colon = [trimmed rangeOfString:@":" options:NSBackwardsSearch];
-    if (colon.location == NSNotFound) { return NO; }
-
-    NSString *host = [[trimmed substringToIndex:colon.location] stringByTrimmingCharactersInSet:ws];
-    NSString *portStr = [[trimmed substringFromIndex:colon.location + 1] stringByTrimmingCharactersInSet:ws];
-    if (host.length == 0 || portStr.length == 0) { return NO; }
-
-    NSCharacterSet *digits = [NSCharacterSet characterSetWithCharactersInString:@"0123456789"];
-    NSCharacterSet *nonDigits = [digits invertedSet];
-    if ([portStr rangeOfCharacterFromSet:nonDigits].location != NSNotFound) { return NO; }
-
-    NSInteger port = [portStr integerValue];
-    if (port < 1 || port > 65535) { return NO; }
-
-    if (outHost) { *outHost = host; }
-    if (outPort) { *outPort = @(port); }
-    return YES;
+    return PSNParseHostPort(value, outHost, outPort);
 }
 
 // Type-strict, crash-safe field checks: a value of the wrong class (e.g. a

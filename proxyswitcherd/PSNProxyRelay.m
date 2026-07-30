@@ -1,6 +1,7 @@
 #import "PSNProxyRelay.h"
 #import "PSNSocketUtil.h"
 #import "PSNProxyAuth.h"
+#import "PSNLog.h"
 #import <sys/socket.h>
 #import <sys/select.h>
 #import <sys/time.h>
@@ -12,9 +13,6 @@
 #import <stdint.h>
 
 const int kPSNRelayPort = 8899;
-
-// PSLog is defined in PSNWiFiProxyHandler.m; declare a lightweight logger here.
-#define RLog(fmt, ...) NSLog((fmt), ##__VA_ARGS__)
 
 @interface PSNProxyRelay () {
     int _listenFd;
@@ -49,7 +47,7 @@ const int kPSNRelayPort = 8899;
     _uUser = [user copy]; _uPass = [pass copy];
     _haveCfg = (user.length > 0);
     [_cfgLock unlock];
-    RLog(@"[relay] configured upstream %@:%d socks=%d auth=%d", host, port, socks, (int)(user.length > 0));
+    PSLog(@"[relay] configured upstream %@:%d socks=%d auth=%d", host, port, socks, (int)(user.length > 0));
 }
 
 - (void)clearUpstream {
@@ -59,7 +57,7 @@ const int kPSNRelayPort = 8899;
 - (void)startIfNeeded {
     if (_listenFd >= 0) { return; }
     int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) { RLog(@"[relay] socket() failed: %s", strerror(errno)); return; }
+    if (fd < 0) { PSLog(@"[relay] socket() failed: %s", strerror(errno)); return; }
     int yes = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
     struct sockaddr_in addr; memset(&addr, 0, sizeof(addr));
@@ -67,15 +65,15 @@ const int kPSNRelayPort = 8899;
     addr.sin_port = htons((uint16_t)kPSNRelayPort);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 127.0.0.1 ONLY
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-        RLog(@"[relay] bind 127.0.0.1:%d failed: %s", kPSNRelayPort, strerror(errno));
+        PSLog(@"[relay] bind 127.0.0.1:%d failed: %s", kPSNRelayPort, strerror(errno));
         close(fd); return;
     }
     if (listen(fd, 16) != 0) {
-        RLog(@"[relay] listen failed: %s", strerror(errno));
+        PSLog(@"[relay] listen failed: %s", strerror(errno));
         close(fd); return;
     }
     _listenFd = fd;
-    RLog(@"[relay] listening on 127.0.0.1:%d", kPSNRelayPort);
+    PSLog(@"[relay] listening on 127.0.0.1:%d", kPSNRelayPort);
     dispatch_async(_acceptQ, ^{ [self acceptLoop]; });
 }
 
@@ -84,7 +82,7 @@ const int kPSNRelayPort = 8899;
         int cfd = accept(_listenFd, NULL, NULL);
         if (cfd < 0) {
             if (errno == EINTR) { continue; }
-            RLog(@"[relay] accept failed: %s", strerror(errno));
+            PSLog(@"[relay] accept failed: %s", strerror(errno));
             break;
         }
         struct timeval io = { .tv_sec = 30, .tv_usec = 0 };
@@ -107,13 +105,13 @@ const int kPSNRelayPort = 8899;
 - (void)handleClient:(int)cfd {
     NSString *host = nil, *user = nil, *pass = nil; int port = 0; BOOL socks = NO;
     if (![self snapshotHost:&host port:&port socks:&socks user:&user pass:&pass]) {
-        RLog(@"[relay] no auth upstream configured; closing client");
+        PSLog(@"[relay] no auth upstream configured; closing client");
         close(cfd); return;
     }
     NSString *detail = nil;
     int ufd = PSNConnectWithTimeout(host, port, 10.0, &detail);
     if (ufd < 0) {
-        RLog(@"[relay] upstream connect failed: %@", detail);
+        PSLog(@"[relay] upstream connect failed: %@", detail);
         close(cfd); return;
     }
     struct timeval io = { .tv_sec = 30, .tv_usec = 0 };
@@ -134,7 +132,7 @@ const int kPSNRelayPort = 8899;
     char head[4096]; size_t hlen = 0;
     while (hlen < sizeof(head) - 1) {
         ssize_t n = PSNReadSome(cfd, head + hlen, 1); // read client 1 byte at a time until \r\n\r\n
-        if (n <= 0) { RLog(@"[relay] http: client head read failed"); return NO; }
+        if (n <= 0) { PSLog(@"[relay] http: client head read failed"); return NO; }
         hlen += (size_t)n;
         if (hlen >= 4 && memcmp(head + hlen - 4, "\r\n\r\n", 4) == 0) { break; }
     }
@@ -153,7 +151,7 @@ const int kPSNRelayPort = 8899;
         char resp[1024]; size_t rlen = 0;
         while (rlen < sizeof(resp) - 1) {
             ssize_t n = PSNReadSome(ufd, resp + rlen, 1);
-            if (n <= 0) { RLog(@"[relay] http: no upstream CONNECT reply"); return NO; }
+            if (n <= 0) { PSLog(@"[relay] http: no upstream CONNECT reply"); return NO; }
             rlen += (size_t)n;
             if (rlen >= 4 && memcmp(resp + rlen - 4, "\r\n\r\n", 4) == 0) { break; }
         }
@@ -163,7 +161,7 @@ const int kPSNRelayPort = 8899;
         NSArray *parts = [statusLine componentsSeparatedByString:@" "];
         NSInteger code = (parts.count >= 2) ? [parts[1] integerValue] : 0;
         if (code != 200) {
-            RLog(@"[relay] http: upstream CONNECT rejected: %@", statusLine);
+            PSLog(@"[relay] http: upstream CONNECT rejected: %@", statusLine);
             const char *fail = "HTTP/1.1 502 Bad Gateway\r\n\r\n";
             PSNWriteAll(cfd, fail, strlen(fail));
             return NO;
@@ -211,7 +209,7 @@ haveReq: ;
     uint8_t um[2];
     if (PSNReadSome(ufd, um, 2) < 2 || um[0] != 0x05) { return NO; }
     if (um[1] != 0x02) {
-        RLog(@"[relay] socks: upstream did not accept user/pass (method=0x%02x)", um[1]);
+        PSLog(@"[relay] socks: upstream did not accept user/pass (method=0x%02x)", um[1]);
         return NO;
     }
     // 4) RFC 1929 sub-negotiation.
@@ -219,7 +217,7 @@ haveReq: ;
     if (!auth || !PSNWriteAll(ufd, auth.bytes, auth.length)) { return NO; }
     uint8_t ar[2];
     if (PSNReadSome(ufd, ar, 2) < 2 || !PSNSocks5UserPassReplyOK(ar, 2)) {
-        RLog(@"[relay] socks: upstream auth rejected");
+        PSLog(@"[relay] socks: upstream auth rejected");
         return NO;
     }
     // 5) Forward the client's CONNECT request to upstream, relay the reply back.
