@@ -3,6 +3,8 @@
 #import "PSNProxyRelay.h"
 #import "PSNLog.h"
 #import "PSNHostPort.h"
+#import "PSNPrefKeys.h"
+#import "PSNTunnelController.h"
 #import "SCNetworkHeader.h"
 #import <CoreFoundation/CoreFoundation.h>
 
@@ -73,6 +75,8 @@
     NSString *activeProxy = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("activeProxy"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     NSNumber *logging = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("logging"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     NSNumber *useSocks = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("useSocks"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    // Must match kPSNPrefTunnelMode; CFSTR needs a compile-time literal.
+    NSNumber *tunnelMode = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("tunnelMode"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 
     NSString *source = @"cfprefsd";
     if (!enabled && !server && !port && !activeProxy) {
@@ -87,6 +91,7 @@
         activeProxy = [preferences stringForKeySafely:@"activeProxy"];
         logging = [preferences objectForKey:@"logging"];
         useSocks = [preferences numberForKeySafely:@"useSocks"];
+        tunnelMode = [preferences numberForKeySafely:kPSNPrefTunnelMode];
     }
 
     PSNLogSetEnabled(logging ? [logging boolValue] : NO);
@@ -111,6 +116,39 @@
     NSString *type = [useSocks boolValue] ? @"socks" : @"http";
     BOOL enabledBool = enabled ? [enabled boolValue] : YES;
     BOOL shouldEnable = enabledBool && (server.length > 0) && (port != nil);
+
+    BOOL wantTunnel = shouldEnable && (tunnelMode ? [tunnelMode boolValue] : NO);
+    if (wantTunnel && [type isEqualToString:@"socks"]) {
+        // The tunnel bridge speaks HTTP CONNECT upstream (that is where SNI
+        // recovery lives). Refuse loudly rather than silently misbehave.
+        PSLog(@"[proxyswitcherngd] tunnel mode requires an HTTP proxy; staying cooperative while useSocks is on");
+        wantTunnel = NO;
+    }
+
+    PSNTunnelController *tun = [PSNTunnelController sharedInstance];
+    if (wantTunnel && ![tun suspended]) {
+        PSNCredential *cred = [PSNCredentialStore lookupHost:server
+                                                        port:port.intValue
+                                                        kind:PSNProxyKindHTTP];
+        if ([tun startWithUpstreamHost:server
+                                  port:port.intValue
+                              username:cred.username
+                              password:cred.password]) {
+            // The tunnel carries ALL traffic. Leaving the SC proxy keys set as
+            // well would double-proxy cooperative apps, so clear them.
+            [[PSNProxyRelay sharedInstance] clearUpstream];
+            [self updateProxy:NO server:nil port:nil type:type];
+            PSLog(@"[proxyswitcherngd] tunnel mode active; system proxy keys cleared");
+            return;
+        }
+        // Fail-open: fall through to cooperative mode. The controller parked
+        // itself in suspended and retries on its own; it posts
+        // tunnelstatechanged when the tunnel comes up.
+        PSLog(@"[proxyswitcherngd] tunnel start failed; falling back to system proxy");
+    } else if (!wantTunnel) {
+        [tun stop];
+    }
+    // (wantTunnel && suspended): cooperative applies below; retry is armed.
 
     NSString *effServer = server;
     NSNumber *effPort = port;

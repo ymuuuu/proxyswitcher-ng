@@ -52,6 +52,7 @@ HST_DEF := -DENABLE_LIBRARY \
 
 proxyswitcherngd_FILES = main.m PSNWiFiProxyHandler.m PSNProxyRelay.m PSNCredentialStore.m \
                          PSNCredentialService.m PSNTunnelNet.c PSNTunnelDevice.m \
+                         PSNTunnelController.m \
                          ../common/PSNProxyAuth.m ../common/PSNSocketUtil.m ../common/PSNCredIPC.m \
                          ../common/PSNLog.m ../common/PSNHostPort.m ../common/PSNPrefKeys.m \
                          ../common/PSNSNISniffer.m \

@@ -7,8 +7,10 @@
 #import "PSNSNISniffer.h"
 #import "PSNTunnelNet.h"
 #import "PSNTunnelDevice.h"
+#import "PSNTunnelController.h"
 #import <arpa/inet.h>
 #import <net/if.h>
+#import <signal.h>
 
 static BOOL PSExpect(NSString *input, BOOL wantOK, NSString *wantHost, int wantPort) {
     NSString *host = nil; NSNumber *port = nil;
@@ -223,6 +225,7 @@ static void settingsChanged(CFNotificationCenterRef center,
                             CFDictionaryRef userInfo) {
     NSLog(@"[proxyswitcherngd] received notification: io.ymuu.proxyswitcherng/settingschanged");
     [PSNCredentialService drainPendingFromPrefs];
+    [[PSNTunnelController sharedInstance] clearSuspension];
     [[PSNWiFiProxyHandler sharedInstance] applyFromPreferences];
 }
 
@@ -303,6 +306,61 @@ static int PSRunNetSelfTest(void) {
     return fails ? 1 : 0;
 }
 
+// Termination path: ONLY async-signal-safe calls. Objective-C, locks,
+// allocation and logging can all deadlock a dying process with the routes
+// still installed - so the handler runs the same plain-C teardown the normal
+// stop path uses (Task 5), then exits.
+static void psnHandleTermSignal(int sig) {
+    PSNTunnelTeardown(true);    // routes + utun fd; idempotent
+    _exit(sig == SIGTERM ? 0 : 128 + sig);
+}
+
+// Crash path, best effort: even without this the kernel purges the utun's
+// routes when the dying process drops the fd, but the /32 exclusions point at
+// the physical gateway and would linger until the KeepAlive restart reclaims
+// them (EEXIST-proof add). Re-raise with the default handler afterwards so
+// the crash still produces a real report.
+static void psnHandleCrashSignal(int sig) {
+    PSNTunnelTeardown(true);
+    struct sigaction sa = { 0 };
+    sa.sa_handler = SIG_DFL;
+    sigemptyset(&sa.sa_mask);
+    sigaction(sig, &sa, NULL);
+    kill(getpid(), sig);
+    // Deliberately no _exit() here. The signal being handled is blocked for
+    // the duration of the handler, so the kill() above only makes it pending;
+    // exiting now would consume the crash and report a tidy 128+sig instead.
+    // Returning restores the mask: SIGABRT is then delivered to SIG_DFL, and
+    // SIGSEGV/SIGBUS/SIGILL re-run the faulting instruction and fault again.
+    // Either way the default handler produces the crash report.
+}
+
+static void psnInstallSignalHandlers(void) {
+    struct sigaction sa = { 0 };
+    sa.sa_handler = psnHandleTermSignal;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT,  &sa, NULL);
+    sigaction(SIGHUP,  &sa, NULL);
+
+    struct sigaction ca = { 0 };
+    ca.sa_handler = psnHandleCrashSignal;
+    sigemptyset(&ca.sa_mask);
+    sigaction(SIGSEGV, &ca, NULL);
+    sigaction(SIGABRT, &ca, NULL);
+    sigaction(SIGBUS,  &ca, NULL);
+    sigaction(SIGILL,  &ca, NULL);
+}
+
+static void tunnelStateChanged(CFNotificationCenterRef center,
+                               void *observer,
+                               CFStringRef name,
+                               const void *object,
+                               CFDictionaryRef userInfo) {
+    NSLog(@"[proxyswitcherngd] received notification: %s", PSNTunnelStateChangedNotification);
+    [[PSNWiFiProxyHandler sharedInstance] applyFromPreferences];
+}
+
 int main(int argc, char **argv, char **envp) {
     if (argc > 1 && strcmp(argv[1], "--selftest") == 0) {
         @autoreleasepool { return PSRunSelfTest(); }
@@ -330,6 +388,17 @@ int main(int argc, char **argv, char **envp) {
                                     CFSTR("io.ymuu.proxyswitcherng/clearlog"),
                                     NULL,
                                     CFNotificationSuspensionBehaviorCoalesce);
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
+                                    NULL,
+                                    tunnelStateChanged,
+                                    CFSTR(PSNTunnelStateChangedNotification),
+                                    NULL,
+                                    CFNotificationSuspensionBehaviorCoalesce);
+
+    // Before applyFromPreferences, which is what starts the tunnel and installs
+    // the routes. Installing the handlers afterwards would leave a window where
+    // a SIGTERM strands the /1 takeover with nothing to tear it down.
+    psnInstallSignalHandlers();
 
     [[PSNProxyRelay sharedInstance] startIfNeeded];
     [PSNCredentialService start];
