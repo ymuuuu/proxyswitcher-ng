@@ -104,6 +104,13 @@ static BOOL PSNIsBracketedIPv6Literal(NSString *value) {
     return [inner rangeOfCharacterFromSet:illegal].location == NSNotFound;
 }
 
+BOOL PSNHostnameIsRequestLineSafe(NSString *host) {
+    if (host.length == 0) { return NO; }
+    if ([host hasPrefix:@"["]) { return PSNIsBracketedIPv6Literal(host); }
+    const char *raw = host.UTF8String;
+    return raw && PSNIsPlausibleHostname((const uint8_t *)raw, strlen(raw));
+}
+
 NSString *PSNSniffHTTPHost(const uint8_t *buf, size_t len) {
     if (!buf || len == 0) { return nil; }
 
