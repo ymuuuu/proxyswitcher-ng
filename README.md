@@ -203,7 +203,45 @@ A modern rewrite of [mikaelbo/ProxySwitcher](https://github.com/mikaelbo/ProxySw
 the original iOS 9 tweak. Same idea, rebuilt for modern rootless and roothide
 jailbreaks, with saved profiles and a few extras.
 
+## References
+
+**Bundled in the daemon** (tunnel mode's packet engine, licenses kept in `vendor/`)
+
+- [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) by heiher, MIT: tun2socks engine
+- [lwIP](https://savannah.nongnu.org/projects/lwip/), BSD 3-clause: the TCP/IP stack under it
+- [libyaml](https://github.com/yaml/libyaml), MIT: parses the engine config
+- [hev-task-system](https://github.com/heiher/hev-task-system) by heiher, MIT: coroutine scheduler
+
+**Prior art**
+
+- [mikaelbo/ProxySwitcher](https://github.com/mikaelbo/ProxySwitcher): the original iOS 9 tweak
+- [dannliu/iOSProxyManager](https://github.com/dannliu/iOSProxyManager): another take on the same idea
+- [Potatso](https://github.com/jackrex/Potatso-iOS): the design precedent for tunnel mode. Same three layers (tun device, then tun2socks, then SOCKS5 out), and its `tun2socks` + lwIP was the engine measured against the one chosen here. Only the first layer differs: Potatso asks iOS for the tun via NetworkExtension, this creates its own utun as root
+- Shadowrocket: same trick, closed source, and the other reason the on-device relay approach was known to work
+
+**Built with**
+
+- [theos](https://theos.dev/): build system
+- [roothide/Dopamine](https://github.com/roothide/Dopamine2-roothide): the jailbreak this targets
+- [Apple's XNU source](https://github.com/apple-oss-distributions/xnu): kernel headers the iOS SDK leaves out
+- [Frida](https://frida.re/): on-device debugging
+
+**Useful alongside it**
+
+- [NVISOsecurity/disable-flutter-tls-verification](https://github.com/NVISOsecurity/disable-flutter-tls-verification): Flutter ignores the iOS trust store, so you need this to read the traffic tunnel mode captures
+
 ## License
 
-See the upstream project for its license. This rewrite is shared for research and
-personal use.
+This rewrite is shared for research and personal use. See the upstream project for its
+license.
+
+Tunnel mode bundles third-party code under `vendor/`, redistributed under its own terms
+with the original copyright notices intact:
+
+- `vendor/hev-socks5-tunnel` and its `src/core`, `third-part/hev-task-system`,
+  `third-part/yaml`: MIT
+- `vendor/hev-socks5-tunnel/third-part/lwip`: BSD 3-clause, © 2001-2002 Swedish Institute
+  of Computer Science
+
+Each keeps its full license file in place. `third-part/wintun` is present in the upstream
+tree but is Windows-only and is not compiled into this build.
