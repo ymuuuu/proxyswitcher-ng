@@ -235,13 +235,5 @@ jailbreaks, with saved profiles and a few extras.
 This rewrite is shared for research and personal use. See the upstream project for its
 license.
 
-Tunnel mode bundles third-party code under `vendor/`, redistributed under its own terms
-with the original copyright notices intact:
-
-- `vendor/hev-socks5-tunnel` and its `src/core`, `third-part/hev-task-system`,
-  `third-part/yaml`: MIT
-- `vendor/hev-socks5-tunnel/third-part/lwip`: BSD 3-clause, © 2001-2002 Swedish Institute
-  of Computer Science
-
-Each keeps its full license file in place. `third-part/wintun` is present in the upstream
-tree but is Windows-only and is not compiled into this build.
+Tunnel mode bundles third-party code under `vendor/`, MIT except lwIP which is BSD
+3-clause. Each keeps its own license file in place.
