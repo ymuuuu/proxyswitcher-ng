@@ -25,3 +25,6 @@ docs/
 CLAUDE.md
 # Detailed working changelog, kept local. The public one lives in README.md.
 CHANGELOG.md
+
+# third-party Frida script, dropped here for convenience (NVISOsecurity/disable-flutter-tls-verification)
+disable-flutter-tls.js

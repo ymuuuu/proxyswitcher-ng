@@ -167,6 +167,10 @@ potholes.
   the tunnel was on. Apple's traffic now goes around the tunnel, so your phone keeps
   behaving like a phone. Turn it off if you specifically want to look at Apple traffic.
 
+  Known gap: this only covers IPv4 right now. On a network with working IPv6, some
+  Apple traffic can still get pulled into the tunnel and those services may still
+  misbehave. If you hit that, turning tunnel mode off puts everything back.
+
 - **Fix: the Wi-Fi icon vanished from the status bar** while tunnel mode was on, with
   nothing in its place, so there was no way to tell if you were even connected. The
   tunnel now tells iOS which real interface it's sitting on top of, and the icon stays
