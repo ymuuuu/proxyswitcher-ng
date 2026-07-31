@@ -1,6 +1,7 @@
 #import "PSNCredentialClient.h"
 #import "PSNCredIPC.h"
 #import "PSNSocketUtil.h"
+#import "PSNPrefKeys.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <sys/socket.h>
 #import <sys/un.h>
@@ -8,7 +9,6 @@
 #import <unistd.h>
 #import <string.h>
 
-static NSString * const kPrefsDomain = @"io.ymuu.proxyswitcherng";
 static NSString * const kSettingsChanged = @"io.ymuu.proxyswitcherng/settingschanged";
 
 @implementation PSNCredentialClient
@@ -48,8 +48,8 @@ static NSString * const kSettingsChanged = @"io.ymuu.proxyswitcherng/settingscha
 }
 
 + (void)fallbackPending:(NSDictionary *)blob {
-	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
-	CFPreferencesSetValue(CFSTR("pendingCred"), (__bridge CFPropertyListRef)blob,
+	CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
+	CFPreferencesSetValue(CFSTR(PSN_PREF_PENDINGCRED_STR), (__bridge CFPropertyListRef)blob,
 		appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	[self postSettingsChanged]; // daemon drains + purges

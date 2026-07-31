@@ -51,6 +51,27 @@
 		</dict>
 		<dict>
 			<key>cell</key><string>PSGroupCell</string>
+			<key>label</key><string>Capture Mode</string>
+			<key>footerText</key><string>Tunnel mode routes every app through the proxy, including apps that ignore the system proxy setting (Flutter, Go). Requires an HTTP proxy (not SOCKS) and a reachable server. If the server stops responding the tunnel shuts down and the normal proxy takes over automatically.</string>
+		</dict>
+		<dict>
+			<key>cell</key><string>PSSwitchCell</string>
+			<key>default</key><false/>
+			<key>defaults</key><string>io.ymuu.proxyswitcherng</string>
+			<key>key</key><string>tunnelMode</string>
+			<key>label</key><string>Tunnel mode (all apps)</string>
+			<key>PostNotification</key><string>io.ymuu.proxyswitcherng/settingschanged</string>
+		</dict>
+		<dict>
+			<key>cell</key><string>PSSwitchCell</string>
+			<key>default</key><true/>
+			<key>defaults</key><string>io.ymuu.proxyswitcherng</string>
+			<key>key</key><string>excludeAppleServices</string>
+			<key>label</key><string>Exclude Apple services</string>
+			<key>PostNotification</key><string>io.ymuu.proxyswitcherng/settingschanged</string>
+		</dict>
+		<dict>
+			<key>cell</key><string>PSGroupCell</string>
 			<key>label</key><string>Diagnostics</string>
 		</dict>
 		<dict>

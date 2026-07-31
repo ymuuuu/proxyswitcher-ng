@@ -5,6 +5,8 @@
 #import "PSNProxyAuth.h"
 #import "PSNCredentialClient.h"
 #import "PSNProfileCell.h"
+#import "PSNHostPort.h"
+#import "PSNPrefKeys.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
@@ -12,7 +14,6 @@
 #import <string.h>
 #import <stdint.h>
 
-static NSString * const kPrefsDomain = @"io.ymuu.proxyswitcherng";
 static NSString * const kSettingsChangedNotification = @"io.ymuu.proxyswitcherng/settingschanged";
 static NSString * const kNoneToken = @"__none__";
 
@@ -173,9 +174,9 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 @implementation PSNRootListController
 
 + (NSArray *)readProfiles {
-	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-	CFArrayRef cfProfiles = CFPreferencesCopyValue(CFSTR("profiles"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFArrayRef cfProfiles = CFPreferencesCopyValue(CFSTR(PSN_PREF_PROFILES_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	if (!cfProfiles) { return @[]; }
 	NSArray *profiles = (__bridge_transfer NSArray *)cfProfiles;
 	if (![profiles isKindOfClass:[NSArray class]]) { return @[]; }
@@ -183,15 +184,15 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 }
 
 + (void)writeProfiles:(NSArray *)profiles {
-	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
-	CFPreferencesSetValue(CFSTR("profiles"), (__bridge CFPropertyListRef)(profiles ?: @[]), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
+	CFPreferencesSetValue(CFSTR(PSN_PREF_PROFILES_STR), (__bridge CFPropertyListRef)(profiles ?: @[]), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 }
 
 + (NSString *)activeProxy {
-	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-	CFStringRef cfValue = CFPreferencesCopyValue(CFSTR("activeProxy"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFStringRef cfValue = CFPreferencesCopyValue(CFSTR(PSN_PREF_ACTIVEPROXY_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	if (!cfValue) { return nil; }
 	NSString *value = (__bridge_transfer NSString *)cfValue;
 	if (![value isKindOfClass:[NSString class]]) { return nil; }
@@ -199,21 +200,21 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 }
 
 + (void)setActiveProxy:(NSString *)activeProxy {
-	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
-	CFPreferencesSetValue(CFSTR("activeProxy"), (__bridge CFPropertyListRef)(activeProxy ?: @""), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
+	CFPreferencesSetValue(CFSTR(PSN_PREF_ACTIVEPROXY_STR), (__bridge CFPropertyListRef)(activeProxy ?: @""), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 }
 
 + (void)setUseSocks:(BOOL)useSocks {
-	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
-	CFPreferencesSetValue(CFSTR("useSocks"), (__bridge CFPropertyListRef)(@(useSocks)), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
+	CFPreferencesSetValue(CFSTR(PSN_PREF_USESOCKS_STR), (__bridge CFPropertyListRef)(@(useSocks)), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 }
 
 + (BOOL)isEnabled {
-	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-	CFBooleanRef cfValue = CFPreferencesCopyValue(CFSTR("enabled"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFBooleanRef cfValue = CFPreferencesCopyValue(CFSTR(PSN_PREF_ENABLED_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	if (!cfValue) { return YES; }
 	if (CFGetTypeID(cfValue) != CFBooleanGetTypeID()) {
 		CFRelease(cfValue);
@@ -266,28 +267,7 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 }
 
 + (BOOL)parseHostPort:(NSString *)value host:(NSString **)outHost port:(NSNumber **)outPort {
-	if (![value isKindOfClass:[NSString class]]) { return NO; }
-	NSCharacterSet *ws = [NSCharacterSet whitespaceAndNewlineCharacterSet];
-	NSString *trimmed = [value stringByTrimmingCharactersInSet:ws];
-	if (trimmed.length == 0) { return NO; }
-
-	NSRange colon = [trimmed rangeOfString:@":" options:NSBackwardsSearch];
-	if (colon.location == NSNotFound) { return NO; }
-
-	NSString *host = [[trimmed substringToIndex:colon.location] stringByTrimmingCharactersInSet:ws];
-	NSString *portStr = [[trimmed substringFromIndex:colon.location + 1] stringByTrimmingCharactersInSet:ws];
-	if (host.length == 0 || portStr.length == 0) { return NO; }
-
-	NSCharacterSet *digits = [NSCharacterSet characterSetWithCharactersInString:@"0123456789"];
-	NSCharacterSet *nonDigits = [digits invertedSet];
-	if ([portStr rangeOfCharacterFromSet:nonDigits].location != NSNotFound) { return NO; }
-
-	NSInteger port = [portStr integerValue];
-	if (port < 1 || port > 65535) { return NO; }
-
-	if (outHost) { *outHost = host; }
-	if (outPort) { *outPort = @(port); }
-	return YES;
+	return PSNParseHostPort(value, outHost, outPort);
 }
 
 - (NSArray *)specifiers {
@@ -388,16 +368,16 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 }
 
 - (NSString *)readManualServer {
-	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-	NSString *server = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("server"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	NSString *server = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR(PSN_PREF_SERVER_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	return [server isKindOfClass:[NSString class]] ? server : @"";
 }
 
 - (NSNumber *)readManualPort {
-	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-	id portValue = (__bridge_transfer id)CFPreferencesCopyValue(CFSTR("port"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	id portValue = (__bridge_transfer id)CFPreferencesCopyValue(CFSTR(PSN_PREF_PORT_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	NSInteger port = 0;
 	if ([portValue isKindOfClass:[NSNumber class]]) {
 		port = [(NSNumber *)portValue integerValue];
@@ -409,16 +389,16 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 }
 
 - (BOOL)readManualUseSocks {
-	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-	id useSocksVal = (__bridge_transfer id)CFPreferencesCopyValue(CFSTR("useSocks"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	id useSocksVal = (__bridge_transfer id)CFPreferencesCopyValue(CFSTR(PSN_PREF_USESOCKS_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	return [useSocksVal isKindOfClass:[NSNumber class]] ? [(NSNumber *)useSocksVal boolValue] : NO;
 }
 
 - (BOOL)readManualAuthBool {
-	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+	CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-	CFBooleanRef cfValue = CFPreferencesCopyValue(CFSTR("manualAuth"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFBooleanRef cfValue = CFPreferencesCopyValue(CFSTR(PSN_PREF_MANUALAUTH_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	if (!cfValue) { return NO; }
 	if (CFGetTypeID(cfValue) != CFBooleanGetTypeID()) {
 		CFRelease(cfValue);
@@ -435,8 +415,8 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 
 - (void)setManualAuth:(id)value specifier:(PSSpecifier *)specifier {
 	BOOL on = [value boolValue];
-	CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
-	CFPreferencesSetValue(CFSTR("manualAuth"), (__bridge CFPropertyListRef)@(on), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+	CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
+	CFPreferencesSetValue(CFSTR(PSN_PREF_MANUALAUTH_STR), (__bridge CFPropertyListRef)@(on), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 	CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 
 	if (!on) {
@@ -686,11 +666,11 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 		// Real profile selected: use its host:port.
 	} else {
 		// Manual mode: read server and port from prefs.
-		CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+		CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
 		CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-		NSString *server = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("server"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+		NSString *server = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR(PSN_PREF_SERVER_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 		if (![server isKindOfClass:[NSString class]]) { server = nil; }
-		id portValue = (__bridge_transfer id)CFPreferencesCopyValue(CFSTR("port"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+		id portValue = (__bridge_transfer id)CFPreferencesCopyValue(CFSTR(PSN_PREF_PORT_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 		NSInteger port = 0;
 		if ([portValue isKindOfClass:[NSNumber class]]) {
 			port = [(NSNumber *)portValue integerValue];
@@ -716,9 +696,9 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 	NSString *hostCopy = testHost;
 	int portInt = testPort.intValue;
 
-	CFStringRef appIDc = (__bridge CFStringRef)kPrefsDomain;
+	CFStringRef appIDc = (__bridge CFStringRef)kPSNPrefDomain;
 	CFPreferencesSynchronize(appIDc, CFSTR("mobile"), kCFPreferencesAnyHost);
-	NSNumber *useSocksNum = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("useSocks"), appIDc, CFSTR("mobile"), kCFPreferencesAnyHost);
+	NSNumber *useSocksNum = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_USESOCKS_STR), appIDc, CFSTR("mobile"), kCFPreferencesAnyHost);
 	BOOL useSocks = [useSocksNum boolValue];
 
 	NSString *pUser = nil, *pPass = nil;

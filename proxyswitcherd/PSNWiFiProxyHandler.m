@@ -1,47 +1,12 @@
 #import "PSNWiFiProxyHandler.h"
 #import "PSNCredentialStore.h"
 #import "PSNProxyRelay.h"
+#import "PSNLog.h"
+#import "PSNHostPort.h"
+#import "PSNPrefKeys.h"
+#import "PSNTunnelController.h"
 #import "SCNetworkHeader.h"
 #import <CoreFoundation/CoreFoundation.h>
-
-static NSString * const kLogPath = @"/var/mobile/Library/Logs/ProxySwitcherNG.log";
-static BOOL gLoggingEnabled = NO;
-
-static void PSAppendFileLog(NSString *line) {
-    if (line.length == 0) { return; }
-
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *dir = [kLogPath stringByDeletingLastPathComponent];
-    if (![fm fileExistsAtPath:dir]) {
-        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-    }
-
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    [formatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ssZZZZZ"];
-    NSString *timestamp = [formatter stringFromDate:[NSDate date]];
-    NSString *entry = [NSString stringWithFormat:@"%@ %@\n", timestamp, line];
-
-    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:kLogPath];
-    if (handle) {
-        [handle seekToEndOfFile];
-        [handle writeData:[entry dataUsingEncoding:NSUTF8StringEncoding]];
-        [handle closeFile];
-    } else {
-        [entry writeToFile:kLogPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    }
-    [fm setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:kLogPath error:nil];
-}
-
-static void PSFileLog(NSString *format, ...) {
-    if (!gLoggingEnabled || !format) { return; }
-    va_list args;
-    va_start(args, format);
-    NSString *line = [[NSString alloc] initWithFormat:format arguments:args];
-    va_end(args);
-    PSAppendFileLog(line);
-}
-
-#define PSLog(format, ...) do { NSLog((format), ##__VA_ARGS__); PSFileLog((format), ##__VA_ARGS__); } while(0)
 
 @interface NSDictionary<KeyType, ObjectType> (Getters)
 
@@ -97,19 +62,21 @@ static void PSFileLog(NSString *format, ...) {
 }
 
 - (void)applyFromPreferences {
-    CFStringRef appID = CFSTR("io.ymuu.proxyswitcherng");
+    CFStringRef appID = CFSTR(PSN_PREF_DOMAIN_STR);
     CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 
-    NSNumber *enabled = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("enabled"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-    NSString *server = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("server"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *enabled = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_ENABLED_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSString *server = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR(PSN_PREF_SERVER_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     // PSEditTextCell stores the port as an NSString; SCPreferences requires a
     // CFNumber for HTTPPort/HTTPSPort. Coerce so we never write a string (which
     // is ignored by the network stack) and never send -isEqualToNumber: to a
     // string later (which crashes).
-    NSNumber *port = [self asNumber:(__bridge_transfer id)CFPreferencesCopyValue(CFSTR("port"), appID, CFSTR("mobile"), kCFPreferencesAnyHost)];
-    NSString *activeProxy = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("activeProxy"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-    NSNumber *logging = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("logging"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-    NSNumber *useSocks = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("useSocks"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *port = [self asNumber:(__bridge_transfer id)CFPreferencesCopyValue(CFSTR(PSN_PREF_PORT_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost)];
+    NSString *activeProxy = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR(PSN_PREF_ACTIVEPROXY_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *logging = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_LOGGING_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *useSocks = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_USESOCKS_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *tunnelMode = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_TUNNELMODE_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *excludeAppleNum = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_EXCLUDEAPPLE_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 
     NSString *source = @"cfprefsd";
     if (!enabled && !server && !port && !activeProxy) {
@@ -118,17 +85,19 @@ static void PSFileLog(NSString *format, ...) {
         if (!preferences) {
             preferences = @{};
         }
-        enabled = [preferences objectForKey:@"enabled"];
-        server = [preferences stringForKeySafely:@"server"];
-        port = [preferences numberForKeySafely:@"port"];
-        activeProxy = [preferences stringForKeySafely:@"activeProxy"];
-        logging = [preferences objectForKey:@"logging"];
-        useSocks = [preferences numberForKeySafely:@"useSocks"];
+        enabled = [preferences objectForKey:kPSNPrefEnabled];
+        server = [preferences stringForKeySafely:kPSNPrefServer];
+        port = [preferences numberForKeySafely:kPSNPrefPort];
+        activeProxy = [preferences stringForKeySafely:kPSNPrefActiveProxy];
+        logging = [preferences objectForKey:kPSNPrefLogging];
+        useSocks = [preferences numberForKeySafely:kPSNPrefUseSocks];
+        tunnelMode = [preferences numberForKeySafely:kPSNPrefTunnelMode];
+        excludeAppleNum = [preferences numberForKeySafely:kPSNPrefExcludeApple];
     }
 
-    gLoggingEnabled = logging ? [logging boolValue] : NO;
+    PSNLogSetEnabled(logging ? [logging boolValue] : NO);
 
-    PSLog(@"[proxyswitcherngd] prefs source=%@ enabled=%@ server=%@ port=%@", source, enabled ?: @"(nil)", server ?: @"(nil)", port ?: @"(nil)");
+    PSLog(@"[proxyswitcherngd] prefs source=%@ enabled=%@ server=%@ port=%@ logging=%@", source, enabled ?: @"(nil)", server ?: @"(nil)", port ?: @"(nil)", logging ?: @"(nil)");
 
     if ([activeProxy isEqualToString:@"__none__"]) {
         PSLog(@"[proxyswitcherngd] activeProxy=__none__; forcing proxy off");
@@ -148,6 +117,44 @@ static void PSFileLog(NSString *format, ...) {
     NSString *type = [useSocks boolValue] ? @"socks" : @"http";
     BOOL enabledBool = enabled ? [enabled boolValue] : YES;
     BOOL shouldEnable = enabledBool && (server.length > 0) && (port != nil);
+
+    // excludeAppleServices is DEFAULT ON - the opposite fallback of
+    // tunnelMode: a NULL cfprefs value (key never written) must mean YES.
+    BOOL excludeApple = excludeAppleNum ? [excludeAppleNum boolValue] : YES;
+
+    BOOL wantTunnel = shouldEnable && (tunnelMode ? [tunnelMode boolValue] : NO);
+    if (wantTunnel && [type isEqualToString:@"socks"]) {
+        // The tunnel bridge speaks HTTP CONNECT upstream (that is where SNI
+        // recovery lives). Refuse loudly rather than silently misbehave.
+        PSLog(@"[proxyswitcherngd] tunnel mode requires an HTTP proxy; staying cooperative while useSocks is on");
+        wantTunnel = NO;
+    }
+
+    PSNTunnelController *tun = [PSNTunnelController sharedInstance];
+    if (wantTunnel && ![tun suspended]) {
+        PSNCredential *cred = [PSNCredentialStore lookupHost:server
+                                                        port:port.intValue
+                                                        kind:PSNProxyKindHTTP];
+        if ([tun startWithUpstreamHost:server
+                                  port:port.intValue
+                              username:cred.username
+                              password:cred.password
+                          excludeApple:excludeApple]) {
+            // The tunnel carries ALL traffic. Leaving the SC proxy keys set as
+            // well would double-proxy cooperative apps, so clear them.
+            [[PSNProxyRelay sharedInstance] clearUpstream];
+            [self updateProxy:NO server:nil port:nil type:type];
+            PSLog(@"[proxyswitcherngd] tunnel mode active; system proxy keys cleared");
+            return;
+        }
+        // Fail-open: fall through to cooperative mode. The controller parked
+        // itself in suspended and retries on its own; it posts
+        // tunnelstatechanged when the tunnel comes up.
+        PSLog(@"[proxyswitcherngd] tunnel start failed; falling back to system proxy");
+    } else if (!wantTunnel) {
+        [tun stop];
+    }
+    // (wantTunnel && suspended): cooperative applies below; retry is armed.
 
     NSString *effServer = server;
     NSNumber *effPort = port;
@@ -387,28 +394,7 @@ static void PSFileLog(NSString *format, ...) {
 }
 
 + (BOOL)parseHostPort:(NSString *)value host:(NSString **)outHost port:(NSNumber **)outPort {
-    if (![value isKindOfClass:[NSString class]]) { return NO; }
-    NSCharacterSet *ws = [NSCharacterSet whitespaceAndNewlineCharacterSet];
-    NSString *trimmed = [value stringByTrimmingCharactersInSet:ws];
-    if (trimmed.length == 0) { return NO; }
-
-    NSRange colon = [trimmed rangeOfString:@":" options:NSBackwardsSearch];
-    if (colon.location == NSNotFound) { return NO; }
-
-    NSString *host = [[trimmed substringToIndex:colon.location] stringByTrimmingCharactersInSet:ws];
-    NSString *portStr = [[trimmed substringFromIndex:colon.location + 1] stringByTrimmingCharactersInSet:ws];
-    if (host.length == 0 || portStr.length == 0) { return NO; }
-
-    NSCharacterSet *digits = [NSCharacterSet characterSetWithCharactersInString:@"0123456789"];
-    NSCharacterSet *nonDigits = [digits invertedSet];
-    if ([portStr rangeOfCharacterFromSet:nonDigits].location != NSNotFound) { return NO; }
-
-    NSInteger port = [portStr integerValue];
-    if (port < 1 || port > 65535) { return NO; }
-
-    if (outHost) { *outHost = host; }
-    if (outPort) { *outPort = @(port); }
-    return YES;
+    return PSNParseHostPort(value, outHost, outPort);
 }
 
 // Type-strict, crash-safe field checks: a value of the wrong class (e.g. a

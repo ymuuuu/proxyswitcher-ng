@@ -30,6 +30,12 @@ every time. Set your proxies once, then flip between them.
   existing profile to flip it between HTTP and SOCKS without recreating it. Each
   row shows the name and address on top, with the protocol and whether auth is on
   in smaller text underneath.
+- **Tunnel mode, for apps that ignore the proxy (beta).** Some apps never read the
+  Wi-Fi proxy setting, so their traffic never reaches your intercept proxy no matter
+  what you set. Flutter apps are the usual culprit. Tunnel mode takes over the phone's
+  routing instead of asking politely, so everything goes through your proxy whether
+  the app cooperates or not. Off by default, and Apple's own services are routed
+  around it so push notifications keep working.
 - **Sticks around.** A small root daemon re-applies your proxy when you switch
   Wi-Fi networks, so it does not fall off on you.
 - **Apply and check, for real.** The Apply button actually routes a request
@@ -134,6 +140,37 @@ potholes.
 ## Changelog
 
 ### Unreleased
+
+- **Tunnel mode — catch apps that ignore the proxy (beta).** Some apps never look at
+  the Wi-Fi proxy setting at all. Flutter apps are the usual example: the proxy is
+  only a suggestion, and their networking code just doesn't read it, so their traffic
+  goes straight out and never reaches Burp. Tunnel mode fixes that by taking over the
+  phone's routing instead of asking nicely, so **everything** goes through your proxy
+  whether the app cooperates or not.
+
+  It's a switch in Settings, off by default. Turn it on when an app is dodging you,
+  turn it off when you're done and everything goes back to normal.
+
+  Worth knowing before you use it:
+
+  - It really does mean *all* traffic, so expect a much noisier Burp.
+  - QUIC/HTTP-3 gets refused on purpose, which makes apps fall back to normal TCP so
+    you can actually see the traffic.
+  - It needs an HTTP proxy upstream. With SOCKS selected it will refuse and stay in
+    normal mode rather than half-work.
+  - This one is **beta.** It's been tested on real Flutter apps and works, but it's a
+    big hammer and I'd like feedback before calling it done.
+
+- **Exclude Apple services (on by default).** Because tunnel mode grabs everything, it
+  was also grabbing Apple's own connections — and those refuse to go through a proxy,
+  which quietly broke push notifications, location services, and universal links while
+  the tunnel was on. Apple's traffic now goes around the tunnel, so your phone keeps
+  behaving like a phone. Turn it off if you specifically want to look at Apple traffic.
+
+- **Fix: the Wi-Fi icon vanished from the status bar** while tunnel mode was on, with
+  nothing in its place, so there was no way to tell if you were even connected. The
+  tunnel now tells iOS which real interface it's sitting on top of, and the icon stays
+  put.
 
 - **Fix:** Settings crashed on open (SIGABRT) as soon as the Profiles list drew,
   because the custom profile-row cell class was handed to the specifier as a class
