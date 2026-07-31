@@ -37,6 +37,11 @@ struct sockaddr_ctl {
 // --- net/if_utun.h ---
 #define UTUN_CONTROL_NAME       "com.apple.net.utun_control"
 #define UTUN_OPT_IFNAME         2
+// setsockopt on the control socket; value is the delegate's interface name
+// (char[], len <= IFNAMSIZ-1, NUL not required - the kernel copies len bytes
+// and terminates itself), and it lands on ifnet_set_delegate() in the kernel.
+// Same value in xnu-8019, -8792, -10002, -11215 (iOS 15-18).
+#define UTUN_OPT_SET_DELEGATE_INTERFACE 15
 
 // --- net/route.h ---
 #define RTM_VERSION             5

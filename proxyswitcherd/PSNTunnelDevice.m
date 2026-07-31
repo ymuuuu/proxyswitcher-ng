@@ -93,6 +93,26 @@ const unsigned kPSNTunMTU = 1500;
     struct in6_addr peer6; inet_pton(AF_INET6, kPSNTunPeerIPv6.UTF8String, &peer6);
     PSNTeardownTrackUtun(_fd, _ifindex, peer4, peer6);
 
+    // Delegate interface: tell the kernel which physical interface this tunnel
+    // rides on (ifnet_set_delegate via the utun control socket). Once the /1
+    // takeover routes are in, nw_path's longest-prefix match lands on this
+    // utun and SpringBoard drops the Wi-Fi glyph; with the delegate set the
+    // path can still see the physical interface underneath. Resolved NOW, at
+    // device creation, which always runs before any tunnel route is installed
+    // (controller resolves the same default route earlier on the same serial
+    // queue). Best-effort: this only changes how the tunnel is perceived, so
+    // a failure is logged and openDevice still succeeds.
+    char delegate[IFNAMSIZ] = {0};
+    if (!PSNDefaultRoute4(NULL, NULL, delegate, sizeof(delegate)) || delegate[0] == 0) {
+        PSLog(@"[tunnel] %@ delegate interface NOT set: no IPv4 default route", _ifname);
+    } else if (setsockopt(_fd, SYSPROTO_CONTROL, UTUN_OPT_SET_DELEGATE_INTERFACE,
+                          delegate, (socklen_t)strlen(delegate)) < 0) {
+        PSLog(@"[tunnel] %@ setsockopt(UTUN_OPT_SET_DELEGATE_INTERFACE %s) failed: %s",
+              _ifname, delegate, strerror(errno));
+    } else {
+        PSLog(@"[tunnel] %@ delegate interface set to %s", _ifname, delegate);
+    }
+
     PSLog(@"[tunnel] created %@ (fd=%d ifindex=%u)", _ifname, _fd, _ifindex);
     return YES;
 }
