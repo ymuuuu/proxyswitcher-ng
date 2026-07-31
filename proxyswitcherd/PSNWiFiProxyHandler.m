@@ -62,21 +62,20 @@
 }
 
 - (void)applyFromPreferences {
-    CFStringRef appID = CFSTR("io.ymuu.proxyswitcherng");
+    CFStringRef appID = CFSTR(PSN_PREF_DOMAIN_STR);
     CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 
-    NSNumber *enabled = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("enabled"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-    NSString *server = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("server"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *enabled = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_ENABLED_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSString *server = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR(PSN_PREF_SERVER_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     // PSEditTextCell stores the port as an NSString; SCPreferences requires a
     // CFNumber for HTTPPort/HTTPSPort. Coerce so we never write a string (which
     // is ignored by the network stack) and never send -isEqualToNumber: to a
     // string later (which crashes).
-    NSNumber *port = [self asNumber:(__bridge_transfer id)CFPreferencesCopyValue(CFSTR("port"), appID, CFSTR("mobile"), kCFPreferencesAnyHost)];
-    NSString *activeProxy = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR("activeProxy"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-    NSNumber *logging = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("logging"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-    NSNumber *useSocks = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("useSocks"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
-    // Must match kPSNPrefTunnelMode; CFSTR needs a compile-time literal.
-    NSNumber *tunnelMode = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR("tunnelMode"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *port = [self asNumber:(__bridge_transfer id)CFPreferencesCopyValue(CFSTR(PSN_PREF_PORT_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost)];
+    NSString *activeProxy = (__bridge_transfer NSString *)CFPreferencesCopyValue(CFSTR(PSN_PREF_ACTIVEPROXY_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *logging = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_LOGGING_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *useSocks = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_USESOCKS_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *tunnelMode = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_TUNNELMODE_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 
     NSString *source = @"cfprefsd";
     if (!enabled && !server && !port && !activeProxy) {
@@ -85,12 +84,12 @@
         if (!preferences) {
             preferences = @{};
         }
-        enabled = [preferences objectForKey:@"enabled"];
-        server = [preferences stringForKeySafely:@"server"];
-        port = [preferences numberForKeySafely:@"port"];
-        activeProxy = [preferences stringForKeySafely:@"activeProxy"];
-        logging = [preferences objectForKey:@"logging"];
-        useSocks = [preferences numberForKeySafely:@"useSocks"];
+        enabled = [preferences objectForKey:kPSNPrefEnabled];
+        server = [preferences stringForKeySafely:kPSNPrefServer];
+        port = [preferences numberForKeySafely:kPSNPrefPort];
+        activeProxy = [preferences stringForKeySafely:kPSNPrefActiveProxy];
+        logging = [preferences objectForKey:kPSNPrefLogging];
+        useSocks = [preferences numberForKeySafely:kPSNPrefUseSocks];
         tunnelMode = [preferences numberForKeySafely:kPSNPrefTunnelMode];
     }
 

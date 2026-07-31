@@ -3,6 +3,7 @@
 #import "PSNCredentialService.h"
 #import <string.h>
 #import "PSNProxyAuth.h"
+#import "PSNPrefKeys.h"
 #import "PSNNetKernel.h"
 #import "PSNSNISniffer.h"
 #import "PSNTunnelNet.h"
@@ -201,6 +202,25 @@ static int PSRunSelfTest(void) {
         BOOL ok = inLan && !outLan && hostSelf && !zeroMask;
         fprintf(stderr, "[selftest] %s subnet cover (lan=%d out=%d host=%d zeromask=%d)\n",
                 ok ? "PASS" : "FAIL", inLan, outLan, hostSelf, zeroMask);
+        fails += !ok;
+    }
+    {
+        // Every cfprefs key, spelled out as a literal (NOT the PSN_PREF_*_STR
+        // macros - comparing the macro to itself proves nothing). A typo in a
+        // key would silently read a preference nothing writes on-device.
+        BOOL ok =
+            [kPSNPrefDomain      isEqualToString:@"io.ymuu.proxyswitcherng"] &&
+            [kPSNPrefEnabled     isEqualToString:@"enabled"] &&
+            [kPSNPrefServer      isEqualToString:@"server"] &&
+            [kPSNPrefPort        isEqualToString:@"port"] &&
+            [kPSNPrefUseSocks    isEqualToString:@"useSocks"] &&
+            [kPSNPrefLogging     isEqualToString:@"logging"] &&
+            [kPSNPrefActiveProxy isEqualToString:@"activeProxy"] &&
+            [kPSNPrefProfiles    isEqualToString:@"profiles"] &&
+            [kPSNPrefManualAuth  isEqualToString:@"manualAuth"] &&
+            [kPSNPrefPendingCred isEqualToString:@"pendingCred"] &&
+            [kPSNPrefTunnelMode  isEqualToString:@"tunnelMode"];
+        fprintf(stderr, "[selftest] %s pref keys match literals\n", ok ? "PASS" : "FAIL");
         fails += !ok;
     }
     fprintf(stderr, "[selftest] %s (%d failures)\n", fails ? "OVERALL FAIL" : "OVERALL PASS", fails);

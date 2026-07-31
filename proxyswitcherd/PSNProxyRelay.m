@@ -276,6 +276,60 @@ static BOOL psn_relay_read_exact(int fd, void *buf, size_t len) {
     return PSNReadSome(fd, buf, len) == (ssize_t)len;
 }
 
+// Reads a SOCKS5 request and decodes its destination. Returns NO after
+// writing any required refusal and leaving cfd for the caller to close.
+static BOOL psn_relay_read_socks5_request(int cfd, NSString **hostOut, uint16_t *portOut) {
+    // 2) Request: VER CMD RSV ATYP DST.ADDR DST.PORT. CONNECT only: a UDP
+    //    ASSOCIATE (0x03) is answered "command not supported" (0x07) - that
+    //    refusal is the QUIC/UDP blackhole, and it is deliberate.
+    uint8_t req[4];
+    if (!psn_relay_read_exact(cfd, req, 4) || req[0] != 0x05) { return NO; }
+    if (req[1] != 0x01) {
+        uint8_t deny[10] = { 0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0 };
+        PSNWriteAll(cfd, deny, sizeof(deny));
+        PSLog(@"[relay] tunnel: refusing SOCKS cmd 0x%02x (UDP blackhole)", req[1]);
+        return NO;
+    }
+
+    NSString *dstHost = nil;
+    uint16_t dstPort = 0;
+    if (req[3] == 0x01) {                                   // IPv4
+        uint8_t a[4], p[2];
+        if (!psn_relay_read_exact(cfd, a, 4) || !psn_relay_read_exact(cfd, p, 2)) { return NO; }
+        dstHost = [NSString stringWithFormat:@"%u.%u.%u.%u", a[0], a[1], a[2], a[3]];
+        dstPort = (uint16_t)((p[0] << 8) | p[1]);
+    } else if (req[3] == 0x03) {                            // domain
+        uint8_t dlen;
+        if (!psn_relay_read_exact(cfd, &dlen, 1)) { return NO; }
+        uint8_t d[255]; uint8_t p[2];
+        if (!psn_relay_read_exact(cfd, d, dlen) || !psn_relay_read_exact(cfd, p, 2)) { return NO; }
+        dstHost = [[NSString alloc] initWithBytes:d length:dlen encoding:NSUTF8StringEncoding];
+        dstPort = (uint16_t)((p[0] << 8) | p[1]);
+    } else if (req[3] == 0x04) {                            // IPv6
+        uint8_t a[16], p[2];
+        if (!psn_relay_read_exact(cfd, a, 16) || !psn_relay_read_exact(cfd, p, 2)) { return NO; }
+        char s[INET6_ADDRSTRLEN] = {0};
+        inet_ntop(AF_INET6, a, s, sizeof(s));
+        dstHost = [NSString stringWithFormat:@"[%s]", s];   // bracketed for CONNECT
+        dstPort = (uint16_t)((p[0] << 8) | p[1]);
+    } else {
+        return NO;
+    }
+    if (dstHost.length == 0 || dstPort == 0) { return NO; }
+    // The engine works at L3 and only ever sends ATYP 0x01/0x04, so a domain
+    // name here came from something else on the device: in tunnel mode this
+    // listener serves every local client with no credential gate. An
+    // unvalidated name goes straight into the CONNECT request line below,
+    // where a CR would inject arbitrary headers.
+    if (!PSNHostnameIsRequestLineSafe(dstHost)) {
+        PSLog(@"[relay] tunnel: rejecting unsafe SOCKS5 destination name");
+        return NO;
+    }
+    *hostOut = dstHost;
+    *portOut = dstPort;
+    return YES;
+}
+
 // SOCKS5 in (from the engine), HTTP CONNECT out (to Burp).
 - (void)handleTunnelClient:(int)cfd
            upstreamAddress:(NSString *)uAddr
@@ -290,52 +344,12 @@ static BOOL psn_relay_read_exact(int fd, void *buf, size_t len) {
     uint8_t noAuth[2] = { 0x05, 0x00 };
     if (!PSNWriteAll(cfd, noAuth, 2)) { close(cfd); return; }
 
-    // 2) Request: VER CMD RSV ATYP DST.ADDR DST.PORT. CONNECT only: a UDP
-    //    ASSOCIATE (0x03) is answered "command not supported" (0x07) - that
-    //    refusal is the QUIC/UDP blackhole, and it is deliberate.
-    uint8_t req[4];
-    if (!psn_relay_read_exact(cfd, req, 4) || req[0] != 0x05) { close(cfd); return; }
-    if (req[1] != 0x01) {
-        uint8_t deny[10] = { 0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0 };
-        PSNWriteAll(cfd, deny, sizeof(deny));
-        PSLog(@"[relay] tunnel: refusing SOCKS cmd 0x%02x (UDP blackhole)", req[1]);
-        close(cfd); return;
-    }
-
+    // 2) Request parse + destination decode: psn_relay_read_socks5_request
+    //    (above) reads VER CMD RSV ATYP DST.ADDR DST.PORT, writes any refusal
+    //    itself, and leaves the close to us.
     NSString *dstHost = nil;
     uint16_t dstPort = 0;
-    if (req[3] == 0x01) {                                   // IPv4
-        uint8_t a[4], p[2];
-        if (!psn_relay_read_exact(cfd, a, 4) || !psn_relay_read_exact(cfd, p, 2)) { close(cfd); return; }
-        dstHost = [NSString stringWithFormat:@"%u.%u.%u.%u", a[0], a[1], a[2], a[3]];
-        dstPort = (uint16_t)((p[0] << 8) | p[1]);
-    } else if (req[3] == 0x03) {                            // domain
-        uint8_t dlen;
-        if (!psn_relay_read_exact(cfd, &dlen, 1)) { close(cfd); return; }
-        uint8_t d[255]; uint8_t p[2];
-        if (!psn_relay_read_exact(cfd, d, dlen) || !psn_relay_read_exact(cfd, p, 2)) { close(cfd); return; }
-        dstHost = [[NSString alloc] initWithBytes:d length:dlen encoding:NSUTF8StringEncoding];
-        dstPort = (uint16_t)((p[0] << 8) | p[1]);
-    } else if (req[3] == 0x04) {                            // IPv6
-        uint8_t a[16], p[2];
-        if (!psn_relay_read_exact(cfd, a, 16) || !psn_relay_read_exact(cfd, p, 2)) { close(cfd); return; }
-        char s[INET6_ADDRSTRLEN] = {0};
-        inet_ntop(AF_INET6, a, s, sizeof(s));
-        dstHost = [NSString stringWithFormat:@"[%s]", s];   // bracketed for CONNECT
-        dstPort = (uint16_t)((p[0] << 8) | p[1]);
-    } else {
-        close(cfd); return;
-    }
-    if (dstHost.length == 0 || dstPort == 0) { close(cfd); return; }
-    // The engine works at L3 and only ever sends ATYP 0x01/0x04, so a domain
-    // name here came from something else on the device: in tunnel mode this
-    // listener serves every local client with no credential gate. An
-    // unvalidated name goes straight into the CONNECT request line below,
-    // where a CR would inject arbitrary headers.
-    if (!PSNHostnameIsRequestLineSafe(dstHost)) {
-        PSLog(@"[relay] tunnel: rejecting unsafe SOCKS5 destination name");
-        close(cfd); return;
-    }
+    if (!psn_relay_read_socks5_request(cfd, &dstHost, &dstPort)) { close(cfd); return; }
 
     // 3) Claim success BEFORE dialling upstream: the app sends no payload
     //    until the SOCKS layer says "connected", and we need its first bytes.

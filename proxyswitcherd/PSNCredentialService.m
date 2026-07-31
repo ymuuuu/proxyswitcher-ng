@@ -2,6 +2,7 @@
 #import "PSNCredentialStore.h"
 #import "PSNCredIPC.h"
 #import "PSNSocketUtil.h"
+#import "PSNPrefKeys.h"
 #import <CoreFoundation/CoreFoundation.h>
 #import <sys/socket.h>
 #import <sys/un.h>
@@ -10,8 +11,6 @@
 #import <unistd.h>
 #import <errno.h>
 #import <string.h>
-
-static NSString * const kPrefsDomain = @"io.ymuu.proxyswitcherng";
 
 @implementation PSNCredentialService
 
@@ -102,10 +101,10 @@ static NSString * const kPrefsDomain = @"io.ymuu.proxyswitcherng";
 + (void)drainPendingFromPrefs {
     // cfprefs-purge fallback: if a client could not reach the socket it leaves a
     // transient "pendingCred" blob for us to consume and immediately purge.
-    CFStringRef appID = (__bridge CFStringRef)kPrefsDomain;
+    CFStringRef appID = (__bridge CFStringRef)kPSNPrefDomain;
     CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     NSDictionary *pending = (__bridge_transfer NSDictionary *)
-        CFPreferencesCopyValue(CFSTR("pendingCred"), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+        CFPreferencesCopyValue(CFSTR(PSN_PREF_PENDINGCRED_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     if (![pending isKindOfClass:[NSDictionary class]]) { return; }
 
     NSString *host = pending[@"host"];
@@ -120,7 +119,7 @@ static NSString * const kPrefsDomain = @"io.ymuu.proxyswitcherng";
                               username:pending[@"user"] password:pending[@"pass"]];
     }
     // Purge immediately so the password never lingers in the plist.
-    CFPreferencesSetValue(CFSTR("pendingCred"), NULL, appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    CFPreferencesSetValue(CFSTR(PSN_PREF_PENDINGCRED_STR), NULL, appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     CFPreferencesSynchronize(appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     NSLog(@"[proxyswitcherngd] drained pendingCred fallback for %@:%d", host, port);
 }
