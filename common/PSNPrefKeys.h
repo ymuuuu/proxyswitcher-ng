@@ -23,6 +23,7 @@
 #define PSN_PREF_MANUALAUTH_STR  "manualAuth"
 #define PSN_PREF_PENDINGCRED_STR "pendingCred"
 #define PSN_PREF_TUNNELMODE_STR  "tunnelMode"
+#define PSN_PREF_EXCLUDEAPPLE_STR "excludeAppleServices"
 
 extern NSString * const kPSNPrefDomain;      // io.ymuu.proxyswitcherng
 extern NSString * const kPSNPrefEnabled;     // bool   master on/off
@@ -35,3 +36,4 @@ extern NSString * const kPSNPrefProfiles;    // array, UI only
 extern NSString * const kPSNPrefManualAuth;  // bool
 extern NSString * const kPSNPrefPendingCred; // dict, prefs -> daemon handoff
 extern NSString * const kPSNPrefTunnelMode;  // bool   NEW: L3 capture, default NO
+extern NSString * const kPSNPrefExcludeApple; // bool  NEW: tunnel bypass for Apple 17.0.0.0/8, default YES

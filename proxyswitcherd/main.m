@@ -219,10 +219,12 @@ static int PSRunSelfTest(void) {
             [kPSNPrefProfiles    isEqualToString:@"profiles"] &&
             [kPSNPrefManualAuth  isEqualToString:@"manualAuth"] &&
             [kPSNPrefPendingCred isEqualToString:@"pendingCred"] &&
-            [kPSNPrefTunnelMode  isEqualToString:@"tunnelMode"];
+            [kPSNPrefTunnelMode  isEqualToString:@"tunnelMode"] &&
+            [kPSNPrefExcludeApple isEqualToString:@"excludeAppleServices"];
         fprintf(stderr, "[selftest] %s pref keys match literals\n", ok ? "PASS" : "FAIL");
         fails += !ok;
     }
+    fails += PSNRelayRunSocks5RequestSelfTest();
     fprintf(stderr, "[selftest] %s (%d failures)\n", fails ? "OVERALL FAIL" : "OVERALL PASS", fails);
     return fails ? 1 : 0;
 }

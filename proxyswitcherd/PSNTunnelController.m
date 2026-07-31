@@ -47,6 +47,7 @@ typedef NS_ENUM(NSInteger, PSNTunnelState) {
     NSString *_upHost; int _upPort; NSString *_upUser; NSString *_upPass;
     NSString *_upIp;                          // resolved BEFORE any route exists
     NSString *_physGw; unsigned _physIdx;     // physical default route at start time
+    BOOL _excludeApple;                       // "Exclude Apple services" pref at start time
 }
 
 + (instancetype)sharedInstance {
@@ -166,8 +167,9 @@ static void PSNTunnelPostStateChanged(void) {
     }
 }
 
-// Exclusions FIRST (upstream, then uncovered DNS resolvers), takeover SECOND.
-// Reverse order briefly routes our own upstream connection into the tunnel.
+// Exclusions FIRST (upstream, then Apple, then uncovered DNS resolvers),
+// takeover SECOND. Reverse order briefly routes our own upstream connection
+// into the tunnel.
 - (BOOL)installRoutesLocked:(NSString *)upstreamIp {
     struct in_addr gw, ipA, peer4;
     inet_pton(AF_INET, _physGw.UTF8String, &gw);
@@ -184,12 +186,36 @@ static void PSNTunnelPostStateChanged(void) {
     // registry was never reset - an invariant violation, not a capacity issue.
     // Untracked means teardown would leave this /32 behind, so undo and fail
     // rather than install a route nothing will ever remove.
-    if (!PSNTeardownTrackExclusion(ipA, gw, _physIdx)) {
+    if (!PSNTeardownTrackExclusion(ipA, gw, _physIdx, -1)) {
         PSLog(@"[tunnel] teardown registry full at the upstream exclusion; aborting takeover");
         PSNRoute4Op(false, ipA, -1, gw, _physIdx, NULL);
         return NO;
     }
     PSLog(@"[tunnel] exclusion: %@/32 via %@ idx %u", upstreamIp, _physGw, _physIdx);
+
+    // Apple owns the legacy 17.0.0.0/8. Routing it around the tunnel via the
+    // physical gateway keeps Apple's pinned system services (push, location,
+    // Safe Browsing, universal links) working: captured by the takeover, they
+    // fail their TLS handshake against the intercepting proxy. IPv4 only -
+    // the teardown registry has no v6 exclusion mechanism, so on v6-capable
+    // networks Apple traffic may still be captured over IPv6.
+    if (_excludeApple) {
+        struct in_addr apple;
+        inet_pton(AF_INET, "17.0.0.0", &apple);
+        if (!PSNRoute4Op(true, apple, 8, gw, _physIdx, &err)) {
+            PSLog(@"[tunnel] Apple exclusion 17.0.0.0/8 via %@ failed: %s",
+                  _physGw, strerror(err));
+            return NO;
+        }
+        // Same rule as the upstream exclusion above: a route nothing will
+        // ever remove is worse than no route, so undo and fail.
+        if (!PSNTeardownTrackExclusion(apple, gw, _physIdx, 8)) {
+            PSLog(@"[tunnel] teardown registry full at the Apple exclusion; aborting takeover");
+            PSNRoute4Op(false, apple, 8, gw, _physIdx, NULL);
+            return NO;
+        }
+        PSLog(@"[tunnel] exclusion: 17.0.0.0/8 via %@ idx %u", _physGw, _physIdx);
+    }
 
     for (NSString *dns in [self currentIPv4Resolvers]) {
         struct in_addr d;
@@ -200,7 +226,7 @@ static void PSNTunnelPostStateChanged(void) {
             PSLog(@"[tunnel] DNS exclusion %@/32 failed: %s", dns, strerror(err));
             return NO;
         }
-        if (!PSNTeardownTrackExclusion(d, gw, _physIdx)) {
+        if (!PSNTeardownTrackExclusion(d, gw, _physIdx, -1)) {
             PSLog(@"[tunnel] teardown registry full; resolver %@ excluded but not tracked", dns);
         }
         PSLog(@"[tunnel] exclusion: DNS %@/32 via %@", dns, _physGw);
@@ -336,7 +362,8 @@ static void PSNTunnelPostStateChanged(void) {
 
 - (void)probeSuspendedLocked {
     PSLog(@"[tunnel] retrying tunnel start (suspended)");
-    if ([self startLockedWithHost:_upHost port:_upPort user:_upUser pass:_upPass]) {
+    if ([self startLockedWithHost:_upHost port:_upPort user:_upUser pass:_upPass
+                     excludeApple:_excludeApple]) {
         PSNTunnelPostStateChanged();   // recovered; handler clears SC keys again
     }
 }
@@ -346,7 +373,8 @@ static void PSNTunnelPostStateChanged(void) {
 // The whole bring-up. Must run on _stateQ. Returns YES iff state is Running
 // at the end. On any failure: tears down, enters Suspended, returns NO.
 - (BOOL)startLockedWithHost:(NSString *)host port:(int)port
-                       user:(NSString *)user pass:(NSString *)pass {
+                       user:(NSString *)user pass:(NSString *)pass
+               excludeApple:(BOOL)excludeApple {
     // 1) Read the physical default route FIRST. The exclusions point at this
     //    gateway; a moved gateway (Wi-Fi switch) forces a restart even when
     //    host:port is unchanged.
@@ -362,8 +390,10 @@ static void PSNTunnelPostStateChanged(void) {
     if (_state == PSNTunnelStateRunning) {
         BOOL sameUpstream = [host isEqualToString:_upHost] && (port == _upPort);
         BOOL sameGateway  = [gwNs isEqualToString:_physGw] && (idx == _physIdx);
-        if (sameUpstream && sameGateway) { return YES; }
-        PSLog(@"[tunnel] %@ changed; restarting", sameUpstream ? @"gateway" : @"upstream");
+        BOOL sameExcl     = (excludeApple == _excludeApple);
+        if (sameUpstream && sameGateway && sameExcl) { return YES; }
+        PSLog(@"[tunnel] %@ changed; restarting",
+              !sameUpstream ? @"upstream" : !sameGateway ? @"gateway" : @"Apple-exclusion pref");
         [self teardownLocked];
         _state = PSNTunnelStateStopped;
     } else if (_state == PSNTunnelStateSuspended) {
@@ -415,6 +445,7 @@ static void PSNTunnelPostStateChanged(void) {
 
     // 6) Routes: exclusions first, takeover second.
     _physGw = [gwNs copy]; _physIdx = idx;
+    _excludeApple = excludeApple;
     if (![self installRoutesLocked:ip]) {
         [self teardownLocked];
         return NO;
@@ -433,17 +464,20 @@ static void PSNTunnelPostStateChanged(void) {
 - (BOOL)startWithUpstreamHost:(NSString *)host
                          port:(int)port
                      username:(NSString *)user
-                     password:(NSString *)pass {
+                     password:(NSString *)pass
+                 excludeApple:(BOOL)excludeApple {
     if (host.length == 0 || port <= 0) { return NO; }
     __block BOOL ok;
     dispatch_sync(_stateQ, ^{
-        ok = [self startLockedWithHost:host port:port user:user pass:pass];
+        ok = [self startLockedWithHost:host port:port user:user pass:pass
+                          excludeApple:excludeApple];
         if (!ok && self->_state != PSNTunnelStateRunning) {
             // Start failure still means "wanted": park in suspended so the
             // probe retries instead of waiting for the next prefs event.
             self->_state = PSNTunnelStateSuspended;
             self->_upHost = [host copy]; self->_upPort = port;
             self->_upUser = [user copy]; self->_upPass = [pass copy];
+            self->_excludeApple = excludeApple;
             [self armProbeTimerLocked];
         }
     });
@@ -459,6 +493,7 @@ static void PSNTunnelPostStateChanged(void) {
         _consecFails = 0;
         _upHost = nil; _upPort = 0; _upUser = nil; _upPass = nil;
         _upIp = nil; _physGw = nil; _physIdx = 0;
+        _excludeApple = NO;
         PSLog(@"[tunnel] stopped");
     });
 }

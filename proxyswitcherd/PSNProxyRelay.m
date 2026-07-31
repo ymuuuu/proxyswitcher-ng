@@ -13,6 +13,7 @@
 #import <string.h>
 #import <stdint.h>
 #import <stdlib.h>
+#import <stdio.h>
 
 const int kPSNRelayPort = 8899;
 
@@ -445,3 +446,103 @@ static BOOL psn_relay_read_socks5_request(int cfd, NSString **hostOut, uint16_t 
 }
 
 @end
+
+#pragma mark - self test
+
+// --selftest driver for psn_relay_read_socks5_request (static, above): writes
+// one request into sv[1] of a socketpair and runs the parser on sv[0]. No
+// network and no kernel dependency. The parser never closes cfd, so this owns
+// and closes BOTH fds on every path - a failing case must not leak an fd into
+// the next one. Returns YES when the case passed and prints its result line.
+static BOOL psn_selftest_socks5_case(const uint8_t *req, size_t reqLen, BOOL closeWriter,
+                                     BOOL wantOK, NSString *wantHost, uint16_t wantPort,
+                                     const uint8_t *wantRefusal, size_t wantRefusalLen,
+                                     NSString *desc) {
+    int sv[2] = { -1, -1 };
+    BOOL pass = NO;
+    do {
+        if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) { break; }
+        // A broken parser must fail the case, never hang the whole selftest
+        // on a read (production gets this bound from acceptLoop's RCVTIMEO).
+        struct timeval tv = { .tv_sec = 5, .tv_usec = 0 };
+        setsockopt(sv[0], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(sv[1], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+        if (write(sv[1], req, reqLen) != (ssize_t)reqLen) { break; }
+        if (closeWriter) { close(sv[1]); sv[1] = -1; }   // truncation case: EOF
+
+        NSString *host = nil; uint16_t port = 0;
+        BOOL ok = psn_relay_read_socks5_request(sv[0], &host, &port);
+        if (ok != wantOK) { break; }
+        if (ok && (![host isEqualToString:wantHost] || port != wantPort)) { break; }
+        if (wantRefusal) {
+            // The refusal is a fixed 10-byte frame; a short or wrong reply
+            // fails the memcmp, a missing one fails the length check.
+            uint8_t got[16];
+            ssize_t n = read(sv[1], got, sizeof(got));
+            if (n != (ssize_t)wantRefusalLen ||
+                memcmp(got, wantRefusal, wantRefusalLen) != 0) { break; }
+        }
+        pass = YES;
+    } while (0);
+    if (sv[0] >= 0) { close(sv[0]); }
+    if (sv[1] >= 0) { close(sv[1]); }
+    fprintf(stderr, "[selftest] %s %s\n", pass ? "PASS" : "FAIL", desc.UTF8String);
+    return pass;
+}
+
+int PSNRelayRunSocks5RequestSelfTest(void) {
+    int fails = 0;
+    {
+        // ATYP 0x01 IPv4: VER CMD RSV ATYP DST.ADDR DST.PORT.
+        const uint8_t r[] = { 0x05, 0x01, 0x00, 0x01, 1, 2, 3, 4, 0x01, 0xBB };
+        fails += !psn_selftest_socks5_case(r, sizeof(r), NO, YES, @"1.2.3.4", 443,
+                                           NULL, 0, @"socks5 request ipv4");
+    }
+    {
+        // ATYP 0x04 IPv6 (2001:db8::1): the host must come back bracketed,
+        // ready for the CONNECT request line.
+        const uint8_t r[] = { 0x05, 0x01, 0x00, 0x04,
+                              0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0,
+                              0, 0, 0, 0, 0, 0, 0, 1,
+                              0x01, 0xBB };
+        fails += !psn_selftest_socks5_case(r, sizeof(r), NO, YES, @"[2001:db8::1]", 443,
+                                           NULL, 0, @"socks5 request ipv6 bracketed");
+    }
+    {
+        // ATYP 0x03 domain.
+        const uint8_t r[] = { 0x05, 0x01, 0x00, 0x03, 11,
+                              'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+                              0x00, 0x50 };
+        fails += !psn_selftest_socks5_case(r, sizeof(r), NO, YES, @"example.com", 80,
+                                           NULL, 0, @"socks5 request domain");
+    }
+    {
+        // CMD 0x03 (UDP ASSOCIATE): refused, and the refusal must be exactly
+        // the 0x07 "command not supported" frame - those bytes ARE the
+        // deliberate QUIC/UDP blackhole, so assert them, not just the NO.
+        const uint8_t r[] = { 0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0 };
+        const uint8_t deny[] = { 0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0 };
+        fails += !psn_selftest_socks5_case(r, sizeof(r), NO, NO, nil, 0,
+                                           deny, sizeof(deny),
+                                           @"socks5 request udp-associate refused (blackhole reply bytes)");
+    }
+    {
+        // Truncated request: short write, then EOF from the closed writer.
+        const uint8_t r[] = { 0x05, 0x01 };
+        fails += !psn_selftest_socks5_case(r, sizeof(r), YES, NO, nil, 0,
+                                           NULL, 0, @"socks5 request truncated");
+    }
+    {
+        // SECURITY: a CR in the domain must be rejected. The name is pasted
+        // into the upstream "CONNECT <host>:<port> HTTP/1.1\r\n" request
+        // line; an unvalidated CR would inject arbitrary request headers.
+        const uint8_t r[] = { 0x05, 0x01, 0x00, 0x03, 8,
+                              'b', 'a', 'd', '\r', 'n', 'a', 'm', 'e',
+                              0x00, 0x50 };
+        fails += !psn_selftest_socks5_case(r, sizeof(r), NO, NO, nil, 0,
+                                           NULL, 0,
+                                           @"socks5 request rejects CR in domain (SECURITY: CONNECT header injection)");
+    }
+    return fails;
+}

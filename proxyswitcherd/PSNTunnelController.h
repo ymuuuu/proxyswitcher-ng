@@ -16,15 +16,18 @@
 @property (nonatomic, readonly) BOOL running;
 @property (nonatomic, readonly) BOOL suspended;
 
-// Brings up tunnel mode. Idempotent when upstream AND physical gateway are
-// unchanged (applyFromPreferences re-runs on network_change, and a moved
-// gateway invalidates the /32 exclusions). On failure: tears everything down,
-// enters suspended (auto-retry armed), returns NO - the caller then applies
-// cooperative mode.
+// Brings up tunnel mode. Idempotent when upstream, physical gateway AND the
+// excludeApple flag are unchanged (applyFromPreferences re-runs on
+// network_change, and a moved gateway invalidates the exclusions; a flipped
+// excludeApple pref must reinstall them). excludeApple == YES additionally
+// routes 17.0.0.0/8 (Apple's pinned system services) around the tunnel via
+// the physical gateway. On failure: tears everything down, enters suspended
+// (auto-retry armed), returns NO - the caller then applies cooperative mode.
 - (BOOL)startWithUpstreamHost:(NSString *)host
                          port:(int)port
                      username:(NSString *)user
-                     password:(NSString *)pass;
+                     password:(NSString *)pass
+                 excludeApple:(BOOL)excludeApple;
 
 // Full teardown and back to a clean stopped state. Safe to call anytime.
 - (void)stop;

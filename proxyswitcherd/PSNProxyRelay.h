@@ -23,3 +23,9 @@ extern const int kPSNRelayPort; // 8899
                               password:(NSString *)pass;
 - (void)clearTunnelUpstream;
 @end
+
+// Entry point for the daemon's --selftest: drives the static SOCKS5 request
+// parser over socketpairs (no network, no kernel dependency). Prints one
+// "[selftest] PASS|FAIL <description>" line per case, in the exact style of
+// PSRunSelfTest (main.m), and returns the number of failures.
+int PSNRelayRunSocks5RequestSelfTest(void);

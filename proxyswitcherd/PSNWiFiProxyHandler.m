@@ -76,6 +76,7 @@
     NSNumber *logging = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_LOGGING_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     NSNumber *useSocks = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_USESOCKS_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
     NSNumber *tunnelMode = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_TUNNELMODE_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
+    NSNumber *excludeAppleNum = (__bridge_transfer NSNumber *)CFPreferencesCopyValue(CFSTR(PSN_PREF_EXCLUDEAPPLE_STR), appID, CFSTR("mobile"), kCFPreferencesAnyHost);
 
     NSString *source = @"cfprefsd";
     if (!enabled && !server && !port && !activeProxy) {
@@ -91,6 +92,7 @@
         logging = [preferences objectForKey:kPSNPrefLogging];
         useSocks = [preferences numberForKeySafely:kPSNPrefUseSocks];
         tunnelMode = [preferences numberForKeySafely:kPSNPrefTunnelMode];
+        excludeAppleNum = [preferences numberForKeySafely:kPSNPrefExcludeApple];
     }
 
     PSNLogSetEnabled(logging ? [logging boolValue] : NO);
@@ -116,6 +118,10 @@
     BOOL enabledBool = enabled ? [enabled boolValue] : YES;
     BOOL shouldEnable = enabledBool && (server.length > 0) && (port != nil);
 
+    // excludeAppleServices is DEFAULT ON - the opposite fallback of
+    // tunnelMode: a NULL cfprefs value (key never written) must mean YES.
+    BOOL excludeApple = excludeAppleNum ? [excludeAppleNum boolValue] : YES;
+
     BOOL wantTunnel = shouldEnable && (tunnelMode ? [tunnelMode boolValue] : NO);
     if (wantTunnel && [type isEqualToString:@"socks"]) {
         // The tunnel bridge speaks HTTP CONNECT upstream (that is where SNI
@@ -132,7 +138,8 @@
         if ([tun startWithUpstreamHost:server
                                   port:port.intValue
                               username:cred.username
-                              password:cred.password]) {
+                              password:cred.password
+                          excludeApple:excludeApple]) {
             // The tunnel carries ALL traffic. Leaving the SC proxy keys set as
             // well would double-proxy cooperative apps, so clear them.
             [[PSNProxyRelay sharedInstance] clearUpstream];

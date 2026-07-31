@@ -13,3 +13,4 @@ NSString * const kPSNPrefProfiles    = @PSN_PREF_PROFILES_STR;
 NSString * const kPSNPrefManualAuth  = @PSN_PREF_MANUALAUTH_STR;
 NSString * const kPSNPrefPendingCred = @PSN_PREF_PENDINGCRED_STR;
 NSString * const kPSNPrefTunnelMode  = @PSN_PREF_TUNNELMODE_STR;
+NSString * const kPSNPrefExcludeApple = @PSN_PREF_EXCLUDEAPPLE_STR;

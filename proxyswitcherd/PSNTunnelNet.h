@@ -61,7 +61,11 @@ void PSNTeardownTrackUtun(int fd, unsigned ifindex,
 void PSNTeardownUntrackUtun(void);
 void PSNTeardownTrackDef1(void);        // the 0.0.0.0/1 + 128.0.0.0/1 pair is in
 void PSNTeardownTrackDef1v6(void);      // the ::/1 + 8000::/1 pair is in
-bool PSNTeardownTrackExclusion(struct in_addr ip, struct in_addr gw, unsigned ifindex); // false if registry full
+// maskBits follows the PSNRoute4Op convention (<0 means a host route /32);
+// the stored value is handed back to PSNRoute4Op at teardown, so a non-/32
+// exclusion (17.0.0.0/8) is deleted with the same mask it was added with.
+bool PSNTeardownTrackExclusion(struct in_addr ip, struct in_addr gw, unsigned ifindex,
+                               int maskBits); // false if registry full
 
 // Removes every route the registry knows about, idempotently, in reverse
 // dependency order (takeover first, exclusions last). When closeUtunFd is

@@ -158,13 +158,16 @@ bool PSNRoute6Op(bool add, struct in6_addr dst, int prefixBits,
 
 #pragma mark - teardown registry storage
 
-// One exclusion entry: dst/32 via gw on ifindex. Sized for 1 upstream proxy +
-// a handful of DNS resolvers; fixed storage because there is no malloc on the
-// signal path. Declared above the default-route query because that query
-// reads gTunIdx (it must never return our own utun as "the physical
-// gateway"); the registry functions themselves are further down.
+// One exclusion entry: dst/maskBits via gw on ifindex, maskBits on the
+// PSNRoute4Op convention (<0 == /32 host route). The mask must be stored:
+// teardown cannot remove a 17.0.0.0/8 with a /32 delete. Sized for 1 upstream
+// proxy + the Apple /8 + a handful of DNS resolvers; fixed storage because
+// there is no malloc on the signal path. Declared above the default-route
+// query because that query reads gTunIdx (it must never return our own utun
+// as "the physical gateway"); the registry functions themselves are further
+// down.
 #define PSN_MAX_EXCLUSIONS 12
-typedef struct { struct in_addr ip, gw; unsigned ifindex; } PSNExclusion;
+typedef struct { struct in_addr ip, gw; unsigned ifindex; int maskBits; } PSNExclusion;
 
 static int          gUtunFd  = -1;
 static unsigned     gTunIdx  = 0;
@@ -322,11 +325,13 @@ void PSNTeardownUntrackUtun(void) {
 void PSNTeardownTrackDef1(void)   { gHaveDef1 = 1; }
 void PSNTeardownTrackDef1v6(void) { gHaveDef1v6 = 1; }
 
-bool PSNTeardownTrackExclusion(struct in_addr ip, struct in_addr gw, unsigned ifindex) {
+bool PSNTeardownTrackExclusion(struct in_addr ip, struct in_addr gw, unsigned ifindex,
+                               int maskBits) {
     if (gExclCount >= PSN_MAX_EXCLUSIONS) { return false; }
     gExcl[gExclCount].ip = ip;
     gExcl[gExclCount].gw = gw;
     gExcl[gExclCount].ifindex = ifindex;
+    gExcl[gExclCount].maskBits = maskBits;
     gExclCount++;
     return true;
 }
@@ -350,7 +355,7 @@ void PSNTunnelTeardown(bool closeUtunFd) {
     }
     while (gExclCount > 0) {
         gExclCount--;
-        PSNRoute4Op(false, gExcl[gExclCount].ip, -1,
+        PSNRoute4Op(false, gExcl[gExclCount].ip, gExcl[gExclCount].maskBits,
                     gExcl[gExclCount].gw, gExcl[gExclCount].ifindex, NULL);
     }
     if (closeUtunFd && gUtunFd >= 0) {
