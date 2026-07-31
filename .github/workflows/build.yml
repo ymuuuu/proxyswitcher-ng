@@ -45,7 +45,10 @@ jobs:
         run: |
           set -euo pipefail
           BUILD="${{ github.run_number }}"
-          /usr/bin/sed -i '' "s/^Version: 0.1-dev$/Version: 0.1-dev.$BUILD/" control
+          # Stamp the build number onto whatever base version control carries.
+          # Do NOT hardcode the base here: it silently stops matching the moment
+          # anyone bumps control, and the package ships without a build number.
+          /usr/bin/sed -i '' -E "s/^Version: (.*)$/Version: \1.$BUILD/" control
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" prefs/Resources/Info.plist
           make clean || true
           make package FINALPACKAGE=1

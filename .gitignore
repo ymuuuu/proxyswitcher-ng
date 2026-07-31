@@ -23,3 +23,5 @@ docs/
 
 # Local agent context, not shipped
 CLAUDE.md
+# Detailed working changelog, kept local. The public one lives in README.md.
+CHANGELOG.md
