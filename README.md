@@ -5,6 +5,16 @@
 <h1 align="center">ProxySwitcher-ng</h1>
 
 <p align="center">
+  <a href="https://github.com/ymuuuu/proxyswitcher-ng/releases/latest"><img src="https://img.shields.io/github/v/release/ymuuuu/proxyswitcher-ng?style=flat&color=0969DA" alt="Latest release" /></a>
+  <a href="https://github.com/ymuuuu/proxyswitcher-ng/releases"><img src="https://img.shields.io/github/downloads/ymuuuu/proxyswitcher-ng/total?style=flat&color=8957E5" alt="Total downloads across all releases" /></a>
+  <a href="https://github.com/ymuuuu/proxyswitcher-ng/stargazers"><img src="https://img.shields.io/github/stars/ymuuuu/proxyswitcher-ng?style=flat&label=%E2%98%85&color=E3B341" alt="GitHub stars" /></a>
+  <img src="https://img.shields.io/badge/license-research%20%26%20personal%20use-F0883E?style=flat" alt="License: research and personal use" />
+  <img src="https://img.shields.io/badge/iOS%2015%2B%20rootless%20%7C%20roothide-3DDC84?style=flat&logo=apple&logoColor=white" alt="Platform: iOS 15+ rootless and roothide" />
+  <a href="https://t.me/ymuulabs"><img src="https://img.shields.io/badge/Telegram-26A5E4?style=flat&logo=telegram&logoColor=white" alt="Telegram channel" /></a>
+  <a href="https://x.com/ymuuu_"><img src="https://img.shields.io/badge/X-000000?style=flat&logo=x&logoColor=white" alt="Follow on X" /></a>
+</p>
+
+<p align="center">
   Flip your iPhone's Wi-Fi proxy on and off from Settings, and keep a list of
   proxies you can switch between with one tap.
 </p>
@@ -140,6 +150,11 @@ potholes.
 ## Changelog
 
 ### Unreleased
+
+- **Fix: Apply failed with "authentication failed (407)" on a proxy with a password.**
+  If you typed the password and tapped Apply while the keyboard was still up, the
+  password was never saved, so the tweak logged in with an empty one. Apply now saves
+  whatever field you are typing in first, and dragging the list closes the keyboard.
 
 - **Tunnel mode — catch apps that ignore the proxy (beta).** Some apps never look at
   the Wi-Fi proxy setting at all. Flutter apps are the usual example: the proxy is
