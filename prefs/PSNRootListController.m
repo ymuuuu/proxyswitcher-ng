@@ -782,7 +782,7 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 
 	NSBundle *bundle = [NSBundle bundleForClass:[self class]];
 	NSDictionary *info = bundle.infoDictionary;
-	NSString *version = info[@"CFBundleShortVersionString"] ?: @"0.1-dev";
+	NSString *version = info[@"CFBundleShortVersionString"] ?: @"?";
 	NSString *build = info[@"CFBundleVersion"] ?: @"0";
 	NSString *labelText = [NSString stringWithFormat:@"ProxySwitcher-ng %@ (build %@)", version, build];
 
@@ -794,11 +794,18 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 
 	UIButton *github = [self iconButtonNamed:@"github" URLString:@"https://github.com/ymuuuu"];
 	github.frame = CGRectMake(16, 36, 24, 24);
+	github.accessibilityLabel = @"GitHub";
 	[container addSubview:github];
 
 	UIButton *website = [self iconButtonNamed:@"website" URLString:@"https://ymuu.me"];
 	website.frame = CGRectMake(48, 36, 24, 24);
+	website.accessibilityLabel = @"Website";
 	[container addSubview:website];
+
+	UIButton *paypal = [self iconButtonNamed:@"paypal" URLString:@"https://paypal.me/ymuu"];
+	paypal.frame = CGRectMake(80, 36, 24, 24);
+	paypal.accessibilityLabel = @"Support me on PayPal";
+	[container addSubview:paypal];
 
 	return container;
 }

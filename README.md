@@ -151,6 +151,11 @@ potholes.
 
 ### Unreleased
 
+- **Support button.** The About footer now has a PayPal icon next to GitHub and the
+  website, if you want to support the project.
+- **Fix: About showed the wrong version** (`0.1-dev` on a `0.2-dev` build). It now
+  reads the same version as the package.
+
 - **Fix: Apply failed with "authentication failed (407)" on a proxy with a password.**
   If you typed the password and tapped Apply while the keyboard was still up, the
   password was never saved, so the tweak logged in with an empty one. Apply now saves
