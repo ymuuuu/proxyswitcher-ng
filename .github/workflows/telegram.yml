@@ -1,0 +1,216 @@
+name: Announce release on Telegram
+
+# workflow_dispatch re-announces an existing release by tag. Editing a release
+# fires `edited`, not `published`, so it is the only repost that needs no
+# delete-and-recreate of the release.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to announce
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to channel
+        env:
+          TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          BODY: ${{ github.event.release.body }}
+          URL: ${{ github.event.release.html_url }}
+          BLOG_URL: https://ymuu.me
+        run: |
+          set -euo pipefail
+
+          # A dispatched run has no release payload; read the release itself.
+          if [ -z "$URL" ]; then
+            BODY="$(gh release view "$TAG" -R "$REPO" --json body --jq .body)"
+            URL="$(gh release view "$TAG" -R "$REPO" --json url --jq .url)"
+            export BODY URL
+          fi
+
+          # Download button points at the .deb when the release has one,
+          # else the first asset, else the button is dropped entirely.
+          ASSET_URL="$(gh release view "$TAG" -R "$REPO" --json assets --jq \
+            '([.assets[] | select(.name | endswith(".deb"))] + .assets)[0].url // empty' \
+            2>/dev/null || true)"
+          export ASSET_URL
+
+          cat > build_post.py <<'PYEOF'
+          import html, json, os, re, sys
+
+          REPO = os.environ["REPO"]
+          TAG = os.environ["TAG"]
+          BODY = os.environ.get("BODY", "").replace("\r", "")
+          URL = os.environ["URL"]
+          ASSET = os.environ.get("ASSET_URL", "").strip()
+          BLOG = os.environ.get("BLOG_URL", "https://ymuu.me")
+
+          owner, name = REPO.split("/", 1)
+          hashtag = re.sub(r"[-.]", "_", name)
+          repo_url = "https://github.com/%s" % REPO
+          profile_url = "https://github.com/%s" % owner
+
+          MARK = re.compile(r"<!--\s*tg\s*-->(.*?)<!--\s*/tg\s*-->", re.S)
+          m = MARK.search(BODY)
+          if m:
+              summary = m.group(1).strip()
+              changelog = (BODY[:m.start()] + "\n" + BODY[m.end():]).strip()
+          else:
+              parts = BODY.strip().split("\n\n", 1)
+              summary = parts[0].strip()
+              changelog = parts[1].strip() if len(parts) > 1 else ""
+
+
+          def inline(s):
+              s = html.escape(s, quote=False)
+              s = re.sub(r"`([^`]+)`", r"<code>\1</code>", s)
+              s = re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", s)
+              s = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r'<a href="\2">\1</a>', s)
+              return s
+
+
+          def md_to_html(md):
+              out, para, items = [], [], []
+              state = {"list": False, "pre": False}
+
+              def flush_para():
+                  if para:
+                      out.append("<p>%s</p>" % inline(" ".join(para)))
+                      del para[:]
+
+              def flush_item():
+                  if items:
+                      out.append("<li>%s</li>" % inline(" ".join(items)))
+                      del items[:]
+
+              def close_list():
+                  flush_item()
+                  if state["list"]:
+                      out.append("</ul>")
+                      state["list"] = False
+
+              def close_pre():
+                  if state["pre"]:
+                      out.append("</pre>")
+                      state["pre"] = False
+
+              for raw in md.split("\n"):
+                  line = raw.rstrip()
+                  if not line.strip():
+                      flush_para(); close_list(); close_pre()
+                      continue
+                  if not state["list"] and (line.startswith("    ") or line.startswith("\t")):
+                      flush_para()
+                      if not state["pre"]:
+                          out.append("<pre>"); state["pre"] = True
+                      out.append(html.escape(line.strip(), quote=False) + "\n")
+                      continue
+                  close_pre()
+                  h = re.match(r"^(#{1,6})\s+(.*)$", line)
+                  if h:
+                      flush_para(); close_list()
+                      lvl = min(len(h.group(1)) + 1, 6)
+                      out.append("<h%d>%s</h%d>" % (lvl, inline(h.group(2)), lvl))
+                      continue
+                  b = re.match(r"^\s*[-*]\s+(.*)$", line)
+                  if b:
+                      flush_para(); flush_item()
+                      if not state["list"]:
+                          out.append("<ul>"); state["list"] = True
+                      items.append(b.group(1).strip())
+                      continue
+                  if state["list"]:
+                      # continuation of the current bullet, not a new paragraph
+                      items.append(line.strip())
+                      continue
+                  para.append(line.strip())
+              flush_para(); close_list(); close_pre()
+              return "".join(out)
+
+
+          summary_html = md_to_html(summary) or "<p>%s</p>" % inline(summary)
+          changelog_html = md_to_html(changelog[:6000]) if changelog else ""
+
+          parts = [
+              "<p><b>\U0001F680 NEW RELEASE</b></p>",
+              "<h2>%s %s</h2>" % (inline(name), inline(TAG)),
+              "<blockquote>%s</blockquote>" % summary_html,
+          ]
+          if changelog_html:
+              parts.append("<details><summary>Changelog</summary>%s</details>" % changelog_html)
+          parts.append("<p>#%s</p>" % hashtag)
+
+          parts.append(
+              "<tg-button-row>"
+              '<tg-button type="url" url="%s" style="primary">Release notes</tg-button>'
+              '<tg-button type="url" url="%s">Repository</tg-button>'
+              "</tg-button-row>" % (URL, repo_url)
+          )
+          parts.append(
+              "<tg-button-row>"
+              '<tg-button type="url" url="%s">GitHub</tg-button>'
+              '<tg-button type="url" url="%s">Blog</tg-button>'
+              "</tg-button-row>" % (profile_url, BLOG)
+          )
+          if ASSET:
+              parts.append(
+                  "<tg-button-row>"
+                  '<tg-button type="url" url="%s" style="success">⬇ Download</tg-button>'
+                  "</tg-button-row>" % ASSET
+              )
+
+          rich_html = "".join(parts)
+
+          kb = [
+              [{"text": "Release notes", "url": URL}, {"text": "Repository", "url": repo_url}],
+              [{"text": "GitHub", "url": profile_url}, {"text": "Blog", "url": BLOG}],
+          ]
+          if ASSET:
+              kb.append([{"text": "⬇ Download", "url": ASSET}])
+
+          flat = re.sub(r"</p>|</li>|<br\s*/?>", "\n", summary_html)
+          flat = re.sub(r"<li>", "- ", flat)
+          flat = re.sub(r"<[^>]+>", "", flat)
+          flat = re.sub(r"\n{3,}", "\n\n", flat).strip()
+          fallback_text = "<b>\U0001F680 NEW RELEASE</b>\n\n<b>%s %s</b>\n\n%s\n\n#%s" % (
+              inline(name), inline(TAG), html.escape(flat, quote=False), hashtag)
+
+          json.dump({"chat_id": os.environ["CHAT_ID"], "rich_message": {"html": rich_html}},
+                    open("rich.json", "w"))
+          json.dump({"chat_id": os.environ["CHAT_ID"], "text": fallback_text,
+                     "parse_mode": "HTML",
+                     "link_preview_options": {"is_disabled": True},
+                     "reply_markup": {"inline_keyboard": kb}},
+                    open("fallback.json", "w"))
+          print(rich_html)
+          PYEOF
+
+          python3 build_post.py >/dev/null
+
+          api="https://api.telegram.org/bot$TOKEN"
+
+          resp="$(curl -sS -X POST "$api/sendRichMessage" \
+            -H 'content-type: application/json' --data @rich.json || true)"
+
+          if printf '%s' "$resp" | jq -e '.ok == true' >/dev/null 2>&1; then
+            echo "posted via sendRichMessage"
+            exit 0
+          fi
+
+          echo "sendRichMessage rejected, falling back to sendMessage"
+          printf '%s\n' "$resp" | jq -r '.description // "no response"'
+
+          curl -sS -X POST "$api/sendMessage" \
+            -H 'content-type: application/json' --data @fallback.json \
+          | jq -e '.ok'
