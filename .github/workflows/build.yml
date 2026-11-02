@@ -48,7 +48,11 @@ jobs:
           # Stamp the build number onto whatever base version control carries.
           # Do NOT hardcode the base here: it silently stops matching the moment
           # anyone bumps control, and the package ships without a build number.
+          # control is also the one source for the version shown in the panel's
+          # About footer; read the base before it gets the build number appended.
+          BASE="$(/usr/bin/sed -n -E 's/^Version: (.*)$/\1/p' control)"
           /usr/bin/sed -i '' -E "s/^Version: (.*)$/Version: \1.$BUILD/" control
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $BASE" prefs/Resources/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD" prefs/Resources/Info.plist
           make clean || true
           make package FINALPACKAGE=1
