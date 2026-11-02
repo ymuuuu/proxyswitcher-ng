@@ -642,6 +642,12 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 }
 
 - (void)applyAndVerify:(id)sender {
+	// A text cell only commits its value (set:specifier:) when editing ends.
+	// Tapping Apply with the keyboard still up would otherwise read the stale
+	// keychain entry - typically the username saved with an empty password -
+	// and both the probe and the relay authenticate with it, so the proxy 407s.
+	[self.view endEditing:YES];
+
 	if (![PSNRootListController isEnabled]) {
 		[PSNRootListController postSettingsChanged];
 		return;
@@ -831,6 +837,10 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 																	 target:self
 																	 action:@selector(applyAndVerify:)];
 	self.navigationItem.rightBarButtonItem.enabled = [PSNRootListController isEnabled];
+	// PSListController has no way to dismiss the keyboard by tapping away, so
+	// a field could never be committed except via Return. Dragging the list now
+	// ends editing, which commits the field.
+	self.table.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
 
 	CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
 									(__bridge void *)self,
