@@ -484,21 +484,22 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 	if (server.length == 0 || port == nil) { return; }
 	BOOL socks = [self readManualUseSocks];
 	NSString *user = [self.manualUsername stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+	// A blank username never deletes. Any field commit lands here, including a
+	// blank Username field that is merely out of date with the keychain, and
+	// deleting on that silently wiped a working credential (#11). Turning the
+	// "Use authentication" switch off is the one way to delete.
+	if (user.length == 0) { return; }
 	NSString *pass = self.manualPassword ?: @"";
-	if (user.length > 0) {
-		// Password field is blank on reload; editing the username alone must not
-		// wipe the stored password. Preserve the existing keychain password when
-		// the user did not type a new one.
-		if (pass.length == 0) {
-			NSString *eu = nil, *ep = nil;
-			if ([PSNCredentialClient getHost:server port:port.intValue socks:socks username:&eu password:&ep] && ep.length > 0) {
-				pass = ep;
-			}
+	// Password field is blank on reload; editing the username alone must not
+	// wipe the stored password. Preserve the existing keychain password when
+	// the user did not type a new one.
+	if (pass.length == 0) {
+		NSString *eu = nil, *ep = nil;
+		if ([PSNCredentialClient getHost:server port:port.intValue socks:socks username:&eu password:&ep] && ep.length > 0) {
+			pass = ep;
 		}
-		[PSNCredentialClient setHost:server port:port.intValue socks:socks username:user password:pass];
-	} else {
-		[PSNCredentialClient deleteHost:server port:port.intValue socks:socks];
 	}
+	[PSNCredentialClient setHost:server port:port.intValue socks:socks username:user password:pass];
 	[PSNRootListController postSettingsChanged];
 }
 
@@ -547,6 +548,27 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 		// Nothing stored under the old key, e.g. the credentials were typed
 		// before Server/Port were filled in. Save what the fields hold now.
 		[self saveManualCredentials];
+	}
+	[self showStoredManualCredential];
+}
+
+// Make the Username field show what is stored for the current key, so the
+// screen never claims a credential the keychain does not hold (or the reverse).
+- (void)showStoredManualCredential {
+	NSString *server = [self readManualServer];
+	NSNumber *port = [self readManualPort];
+	NSString *user = nil, *pass = nil;
+	BOOL found = server.length > 0 && port != nil
+		&& [PSNCredentialClient getHost:server port:port.intValue socks:[self readManualUseSocks] username:&user password:&pass];
+	self.manualUsername = found ? (user ?: @"") : @"";
+	self.manualPassword = @"";
+	[self reloadSpecifierIfShown:self.manualUserSpec];
+	[self reloadSpecifierIfShown:self.manualPassSpec];
+}
+
+- (void)reloadSpecifierIfShown:(PSSpecifier *)spec {
+	if (spec && [_specifiers indexOfObjectIdenticalTo:spec] != NSNotFound) {
+		[self reloadSpecifier:spec animated:NO];
 	}
 }
 
