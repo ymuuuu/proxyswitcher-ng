@@ -152,6 +152,9 @@ potholes.
 
 ### Unreleased
 
+- **A saved password now shows as dots.** The Password field used to look empty even
+  when a password was saved, which read as "no password". It now shows `••••••••` when
+  one is stored. The real password still never leaves the keychain.
 - **Apply shows that it is working.** The Apply button turns into a spinner while the
   proxy is being checked, extra taps are ignored until it finishes, and the phone gives
   a short success or error buzz with the result.

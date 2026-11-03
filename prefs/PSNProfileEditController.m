@@ -1,6 +1,7 @@
 #import "PSNProfileEditController.h"
 #import "PSNRootListController.h"
 #import "PSNCredentialClient.h"
+#import "PSNPasswordPlaceholder.h"
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
 
@@ -23,6 +24,8 @@ static NSString * const kProfileEditAuthKey = @"authOn";
 @property (nonatomic, strong) PSSpecifier *authToggleSpec;
 @property (nonatomic, strong) PSSpecifier *userSpec;
 @property (nonatomic, strong) PSSpecifier *passSpec;
+// A password is stored for this profile; the field shows a placeholder for it.
+@property (nonatomic) BOOL storedPasswordExists;
 @end
 
 @implementation PSNProfileEditController
@@ -59,6 +62,7 @@ static NSString * const kProfileEditAuthKey = @"authOn";
 			if ([PSNCredentialClient getHost:self.hostValue port:[self.portValue intValue]
 									   socks:socks username:&u password:&p]) {
 				self.userValue = u ?: @"";
+				self.storedPasswordExists = (p.length > 0);
 			}
 		}
 
@@ -113,7 +117,7 @@ static NSString * const kProfileEditAuthKey = @"authOn";
 		[typeSpec setProperty:@([self.typeValue isEqualToString:@"socks"]) forKey:PSDefaultValueKey];
 
 		PSSpecifier *authGroup = [PSSpecifier groupSpecifierWithName:@"Authentication (optional)"];
-		[authGroup setProperty:@"Leave blank for no proxy auth. Password is stored in the keychain, never in prefs." forKey:PSFooterTextGroupKey];
+		[authGroup setProperty:@"Leave blank for no proxy auth. Password is stored in the keychain, never in prefs. Grey dots in Password mean a password is saved; type a new one to replace it." forKey:PSFooterTextGroupKey];
 
 		PSSpecifier *authToggleSpec = [PSSpecifier preferenceSpecifierNamed:@"Use authentication"
 																   target:self
@@ -138,6 +142,9 @@ static NSString * const kProfileEditAuthKey = @"authOn";
 				detail:NULL cell:PSSecureEditTextCell edit:NULL];
 		[passSpec setProperty:kProfileEditPassKey forKey:PSKeyNameKey];
 		[passSpec setProperty:self.passValue forKey:PSDefaultValueKey];
+		if (self.storedPasswordExists) {
+			[passSpec setProperty:PSNSavedPasswordPlaceholder forKey:PSPlaceholderKey];
+		}
 		self.passSpec = passSpec;
 
 		NSMutableArray *specs = [NSMutableArray arrayWithObjects:group, nameSpec, hostSpec, portSpec, typeSpec,
@@ -206,6 +213,15 @@ static NSString * const kProfileEditAuthKey = @"authOn";
 		self.userValue = string;
 	} else if ([key isEqualToString:kProfileEditPassKey]) {
 		self.passValue = string;
+	}
+}
+
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
+	if ([PSListController instancesRespondToSelector:_cmd]) {
+		[super tableView:tableView willDisplayCell:cell forRowAtIndexPath:indexPath];
+	}
+	if ([self specifierAtIndexPath:indexPath] == self.passSpec) {
+		PSNSetPasswordPlaceholder(cell, self.storedPasswordExists ? PSNSavedPasswordPlaceholder : nil);
 	}
 }
 
