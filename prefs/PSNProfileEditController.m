@@ -117,7 +117,7 @@ static NSString * const kProfileEditAuthKey = @"authOn";
 		[typeSpec setProperty:@([self.typeValue isEqualToString:@"socks"]) forKey:PSDefaultValueKey];
 
 		PSSpecifier *authGroup = [PSSpecifier groupSpecifierWithName:@"Authentication (optional)"];
-		[authGroup setProperty:@"Leave blank for no proxy auth. Password is stored in the keychain, never in prefs." forKey:PSFooterTextGroupKey];
+		[authGroup setProperty:@"Leave blank for no proxy auth. Password is stored in the keychain, never in prefs. Grey dots in Password mean a password is saved; type a new one to replace it." forKey:PSFooterTextGroupKey];
 
 		PSSpecifier *authToggleSpec = [PSSpecifier preferenceSpecifierNamed:@"Use authentication"
 																   target:self
