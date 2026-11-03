@@ -12,6 +12,7 @@
   <img src="https://img.shields.io/badge/iOS%2015%2B%20rootless%20%7C%20roothide-3DDC84?style=flat&logo=apple&logoColor=white" alt="Platform: iOS 15+ rootless and roothide" />
   <a href="https://t.me/ymuulabs"><img src="https://img.shields.io/badge/Telegram-26A5E4?style=flat&logo=telegram&logoColor=white" alt="Telegram channel" /></a>
   <a href="https://x.com/ymuuu_"><img src="https://img.shields.io/badge/X-000000?style=flat&logo=x&logoColor=white" alt="Follow on X" /></a>
+  <a href="https://paypal.me/ymuu"><img src="https://img.shields.io/badge/PayPal-003087?style=flat&logo=paypal&logoColor=white" alt="Support me on PayPal" /></a>
 </p>
 
 <p align="center">
