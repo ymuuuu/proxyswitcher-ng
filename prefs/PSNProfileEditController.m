@@ -1,6 +1,7 @@
 #import "PSNProfileEditController.h"
 #import "PSNRootListController.h"
 #import "PSNCredentialClient.h"
+#import "PSNPasswordPlaceholder.h"
 #import <Preferences/Preferences.h>
 #import <UIKit/UIKit.h>
 
@@ -212,6 +213,15 @@ static NSString * const kProfileEditAuthKey = @"authOn";
 		self.userValue = string;
 	} else if ([key isEqualToString:kProfileEditPassKey]) {
 		self.passValue = string;
+	}
+}
+
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
+	if ([PSListController instancesRespondToSelector:_cmd]) {
+		[super tableView:tableView willDisplayCell:cell forRowAtIndexPath:indexPath];
+	}
+	if ([self specifierAtIndexPath:indexPath] == self.passSpec) {
+		PSNSetPasswordPlaceholder(cell, self.storedPasswordExists ? PSNSavedPasswordPlaceholder : nil);
 	}
 }
 

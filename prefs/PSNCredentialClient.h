@@ -1,10 +1,5 @@
 #import <Foundation/Foundation.h>
 
-// Placeholder shown in a Password field when a password is stored. A stored
-// password is never read back into the field; a placeholder is never committed,
-// so the dots can never be saved as the password.
-extern NSString * const PSNSavedPasswordPlaceholder;
-
 @interface PSNCredentialClient : NSObject
 // Sends set/delete over the daemon's UNIX-domain credential socket; on socket
 // failure falls back to a cfprefs pendingCred blob + settingschanged (the daemon

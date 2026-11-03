@@ -4,6 +4,7 @@
 #import "PSNSocketUtil.h"
 #import "PSNProxyAuth.h"
 #import "PSNCredentialClient.h"
+#import "PSNPasswordPlaceholder.h"
 #import "PSNProfileCell.h"
 #import "PSNHostPort.h"
 #import "PSNPrefKeys.h"
@@ -814,6 +815,16 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 		cell.accessoryType = [value isEqualToString:activeProxy] ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
 	}
 	return cell;
+}
+
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
+	if ([PSListController instancesRespondToSelector:_cmd]) {
+		[super tableView:tableView willDisplayCell:cell forRowAtIndexPath:indexPath];
+	}
+	PSSpecifier *specifier = [self specifierAtIndexPath:indexPath];
+	if (specifier == self.manualPassSpec) {
+		PSNSetPasswordPlaceholder(cell, [specifier propertyForKey:PSPlaceholderKey]);
+	}
 }
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {

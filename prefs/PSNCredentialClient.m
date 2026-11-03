@@ -9,8 +9,6 @@
 #import <unistd.h>
 #import <string.h>
 
-NSString * const PSNSavedPasswordPlaceholder = @"\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
-
 static NSString * const kSettingsChanged = @"io.ymuu.proxyswitcherng/settingschanged";
 
 @implementation PSNCredentialClient
