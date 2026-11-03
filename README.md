@@ -151,6 +151,9 @@ potholes.
 
 ### Unreleased
 
+- **Apply shows that it is working.** The Apply button turns into a spinner while the
+  proxy is being checked, extra taps are ignored until it finishes, and the phone gives
+  a short success or error buzz with the result.
 - **Fix: changing the server or port broke an authenticated proxy (407).** The saved
   username and password stayed attached to the old address, so after editing Server,
   Port or the SOCKS switch, the tweak connected without logging in. They now follow
