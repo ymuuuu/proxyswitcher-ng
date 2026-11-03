@@ -349,16 +349,7 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 	[_specifiers insertObject:toggle atIndex:idx + 1];
 
 	if (manualAuth) {
-		NSString *server = [self readManualServer];
-		NSNumber *port = [self readManualPort];
-		BOOL socks = [self readManualUseSocks];
-		if (server.length > 0 && port != nil) {
-			NSString *u = nil, *p = nil;
-			if ([PSNCredentialClient getHost:server port:port.intValue socks:socks username:&u password:&p]) {
-				self.manualUsername = u ?: @"";
-				// Password is never prefilled; field always starts blank on reload.
-			}
-		}
+		[self loadStoredManualCredential];
 		[user setProperty:self.manualUsername ?: @"" forKey:PSDefaultValueKey];
 		[pass setProperty:@"" forKey:PSDefaultValueKey];
 		[_specifiers insertObject:user atIndex:idx + 2];
@@ -432,14 +423,7 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 	if (on) {
 		// Prefill the username from the keychain so an existing credential shows up
 		// immediately when auth is re-enabled (mirrors the edit-profile screen).
-		NSString *server = [self readManualServer];
-		NSNumber *port = [self readManualPort];
-		if (server.length > 0 && port != nil) {
-			NSString *u = nil, *p = nil;
-			if ([PSNCredentialClient getHost:server port:port.intValue socks:[self readManualUseSocks] username:&u password:&p]) {
-				self.manualUsername = u ?: @"";
-			}
-		}
+		[self loadStoredManualCredential];
 		if ([_specifiers indexOfObjectIdenticalTo:self.manualUserSpec] == NSNotFound) {
 			[self insertSpecifier:self.manualUserSpec afterSpecifier:self.manualAuthToggleSpec animated:YES];
 		}
@@ -557,6 +541,15 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 // Make the Username field show what is stored for the current key, so the
 // screen never claims a credential the keychain does not hold (or the reverse).
 - (void)showStoredManualCredential {
+	[self loadStoredManualCredential];
+	[self reloadSpecifierIfShown:self.manualUserSpec];
+	[self reloadSpecifierIfShown:self.manualPassSpec];
+}
+
+// Loads the username stored for the current key into the field model, and
+// marks the Password field with dots when a password is stored. The password
+// itself never enters the field (it is not prefilled).
+- (void)loadStoredManualCredential {
 	NSString *server = [self readManualServer];
 	NSNumber *port = [self readManualPort];
 	NSString *user = nil, *pass = nil;
@@ -564,8 +557,7 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 		&& [PSNCredentialClient getHost:server port:port.intValue socks:[self readManualUseSocks] username:&user password:&pass];
 	self.manualUsername = found ? (user ?: @"") : @"";
 	self.manualPassword = @"";
-	[self reloadSpecifierIfShown:self.manualUserSpec];
-	[self reloadSpecifierIfShown:self.manualPassSpec];
+	[self.manualPassSpec setProperty:(found && pass.length > 0 ? PSNSavedPasswordPlaceholder : @"") forKey:PSPlaceholderKey];
 }
 
 - (void)reloadSpecifierIfShown:(PSSpecifier *)spec {

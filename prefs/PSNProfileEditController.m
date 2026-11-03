@@ -23,6 +23,8 @@ static NSString * const kProfileEditAuthKey = @"authOn";
 @property (nonatomic, strong) PSSpecifier *authToggleSpec;
 @property (nonatomic, strong) PSSpecifier *userSpec;
 @property (nonatomic, strong) PSSpecifier *passSpec;
+// A password is stored for this profile; the field shows a placeholder for it.
+@property (nonatomic) BOOL storedPasswordExists;
 @end
 
 @implementation PSNProfileEditController
@@ -59,6 +61,7 @@ static NSString * const kProfileEditAuthKey = @"authOn";
 			if ([PSNCredentialClient getHost:self.hostValue port:[self.portValue intValue]
 									   socks:socks username:&u password:&p]) {
 				self.userValue = u ?: @"";
+				self.storedPasswordExists = (p.length > 0);
 			}
 		}
 
@@ -138,6 +141,9 @@ static NSString * const kProfileEditAuthKey = @"authOn";
 				detail:NULL cell:PSSecureEditTextCell edit:NULL];
 		[passSpec setProperty:kProfileEditPassKey forKey:PSKeyNameKey];
 		[passSpec setProperty:self.passValue forKey:PSDefaultValueKey];
+		if (self.storedPasswordExists) {
+			[passSpec setProperty:PSNSavedPasswordPlaceholder forKey:PSPlaceholderKey];
+		}
 		self.passSpec = passSpec;
 
 		NSMutableArray *specs = [NSMutableArray arrayWithObjects:group, nameSpec, hostSpec, portSpec, typeSpec,
