@@ -165,6 +165,8 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 @property (nonatomic, strong) PSSpecifier *manualPassSpec;
 @property (nonatomic, copy) NSString *manualUsername;
 @property (nonatomic, copy) NSString *manualPassword;
+// Non-nil only while an Apply probe is running; holds the button to restore.
+@property (nonatomic, strong) UIBarButtonItem *applyButtonItem;
 
 - (UIButton *)iconButtonNamed:(NSString *)name URLString:(NSString *)URLString;
 - (void)openLink:(UIButton *)sender;
@@ -698,12 +700,32 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 	[self pushController:editController];
 }
 
+// The probe can take up to its 8s timeout. Swap the Apply button for a spinner
+// so the tap visibly registered, and so a second tap cannot start a second
+// probe whose alert would collide with the first.
+- (void)beginApplyProgress {
+	self.applyButtonItem = self.navigationItem.rightBarButtonItem;
+	UIActivityIndicatorView *spinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+	[spinner startAnimating];
+	self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithCustomView:spinner];
+}
+
+- (void)endApplyProgressSucceeded:(BOOL)ok {
+	self.navigationItem.rightBarButtonItem = self.applyButtonItem;
+	self.navigationItem.rightBarButtonItem.enabled = [PSNRootListController isEnabled];
+	self.applyButtonItem = nil;
+	UINotificationFeedbackGenerator *haptic = [UINotificationFeedbackGenerator new];
+	[haptic notificationOccurred:(ok ? UINotificationFeedbackTypeSuccess : UINotificationFeedbackTypeError)];
+}
+
 - (void)openLogs:(PSSpecifier *)specifier {
 	PSNLogsController *logsController = [[PSNLogsController alloc] init];
 	[self pushController:logsController];
 }
 
 - (void)applyAndVerify:(id)sender {
+	if (self.applyButtonItem) { return; }  // a probe is already running
+
 	// A text cell only commits its value (set:specifier:) when editing ends.
 	// Tapping Apply with the keyboard still up would otherwise read the stale
 	// keychain entry - typically the username saved with an empty password -
@@ -774,10 +796,12 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 	NSString *userCopy = pUser ?: @"";
 	NSString *passCopy = pPass ?: @"";
 
+	[self beginApplyProgress];
 	dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
 		NSString *detail = nil;
 		BOOL ok = PSProbeThroughProxy(hostCopy, portInt, useSocks, userCopy, passCopy, 8.0, &detail);
 		dispatch_async(dispatch_get_main_queue(), ^{
+			[self endApplyProgressSucceeded:ok];
 			NSString *typeStr = useSocks ? @"SOCKS5" : @"HTTP";
 			NSString *message = ok
 				? [NSString stringWithFormat:@"%@ proxy %@ reached %@:%d.\n\n%@", typeStr, displayHostPort, kProbeTargetHost, kProbeTargetPort, detail ?: @""]
