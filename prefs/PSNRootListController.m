@@ -510,6 +510,46 @@ static BOOL PSProbeThroughProxy(NSString *proxyHost, int proxyPort, BOOL useSock
 	[PSNCredentialClient deleteHost:server port:port.intValue socks:socks];
 }
 
+// Manual credentials are keyed by server, port and SOCKS kind, but those three
+// are plain Root.plist cells. Without this, changing any of them strands the
+// stored credential under the old key and the next Apply sends no auth (#11).
+- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {
+	NSString *key = [specifier propertyForKey:PSKeyNameKey];
+	BOOL keysCredential = [key isEqualToString:@"server"] || [key isEqualToString:@"port"] || [key isEqualToString:@"useSocks"];
+	if (!keysCredential || ![self readManualAuthBool]) {
+		[super setPreferenceValue:value specifier:specifier];
+		return;
+	}
+	NSString *oldServer = [self readManualServer];
+	NSNumber *oldPort = [self readManualPort];
+	BOOL oldSocks = [self readManualUseSocks];
+	[super setPreferenceValue:value specifier:specifier];
+	[self carryManualCredentialsFromServer:oldServer port:oldPort socks:oldSocks];
+}
+
+- (void)carryManualCredentialsFromServer:(NSString *)oldServer port:(NSNumber *)oldPort socks:(BOOL)oldSocks {
+	NSString *server = [self readManualServer];
+	NSNumber *port = [self readManualPort];
+	BOOL socks = [self readManualUseSocks];
+	if (server.length == 0 || port == nil) { return; }
+	if ([server isEqualToString:oldServer] && [port isEqual:oldPort] && socks == oldSocks) { return; }
+
+	NSString *user = nil, *pass = nil;
+	BOOL haveOld = oldServer.length > 0 && oldPort != nil
+		&& [PSNCredentialClient getHost:oldServer port:oldPort.intValue socks:oldSocks username:&user password:&pass]
+		&& user.length > 0;
+	if (haveOld) {
+		// Copy, never move: profiles share this keychain keyspace, so the old
+		// host:port may also be a saved profile's credential.
+		[PSNCredentialClient setHost:server port:port.intValue socks:socks username:user password:pass];
+		[PSNRootListController postSettingsChanged];
+	} else if (self.manualUsername.length > 0) {
+		// Nothing stored under the old key, e.g. the credentials were typed
+		// before Server/Port were filled in. Save what the fields hold now.
+		[self saveManualCredentials];
+	}
+}
+
 - (NSArray *)aboutSpecifiers {
 	PSSpecifier *group = [PSSpecifier groupSpecifierWithName:@"About"];
 	return @[group];
