@@ -156,6 +156,8 @@ potholes.
   Port or the SOCKS switch, the tweak connected without logging in. They now follow
   the address you change to.
 
+### v0.2-dev.47 (2026-11-02)
+
 - **Support button.** The About footer now has a PayPal icon next to GitHub and the
   website, if you want to support the project.
 - **Fix: About showed the wrong version** (`0.1-dev` on a `0.2-dev` build). It now
