@@ -150,7 +150,7 @@ potholes.
 
 ## Changelog
 
-### Unreleased
+### v0.3 (2026-11-03)
 
 - **A saved password now shows as dots.** The Password field used to look empty even
   when a password was saved, which read as "no password". It now shows `••••••••` when
